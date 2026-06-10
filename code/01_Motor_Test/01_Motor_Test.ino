@@ -1,7 +1,7 @@
 #define STEP_PIN 2
 #define DIR_PIN  1
 
-#define STEPS_PER_REV 3200   // 1600/3200/6400
+#define STEPS_PER_REV 6400   // 1600/3200/6400
 
 void setup() {
   pinMode(STEP_PIN, OUTPUT);
