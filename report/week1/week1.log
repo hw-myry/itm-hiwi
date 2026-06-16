@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.13)  12 JUN 2026 11:53
+This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.13)  16 JUN 2026 19:41
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -483,50 +483,56 @@ File: overview.png Graphic file (type png)
 <use overview.png>
 Package pdftex.def Info: overview.png  used on input line 32.
 (pdftex.def)             Requested size: 386.96027pt x 199.05719pt.
+LaTeX Font Info:    External font `cmex10' loaded for size
+(Font)              <12> on input line 42.
+LaTeX Font Info:    External font `cmex10' loaded for size
+(Font)              <8> on input line 42.
+LaTeX Font Info:    External font `cmex10' loaded for size
+(Font)              <6> on input line 42.
+[1
 
-Overfull \hbox (0.14046pt too wide) in paragraph at lines 41--42
+{c:/texlive/2026/texmf-var/fonts/map/pdftex/updmap/pdftex.map}{c:/texlive/2026/
+texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc} <./overview.png>]
+Overfull \hbox (12.70137pt too wide) in paragraph at lines 60--64
+[]\T1/cmr/m/n/12 Da der ESP32-S3 eine niedrigere Ver-sorgungss-pan-nung benötig
+t, wird zusät-zlich ein DC/DC-
+ []
+
+
+Overfull \hbox (0.14046pt too wide) in paragraph at lines 70--71
 []\T1/cmr/m/n/12 Im Vollschrit-t-be-trieb be-trägt die the-o-retis-che Schrittz
 ahl für eine voll-ständige Um-drehung: 
  []
 
-LaTeX Font Info:    External font `cmex10' loaded for size
-(Font)              <12> on input line 43.
-LaTeX Font Info:    External font `cmex10' loaded for size
-(Font)              <8> on input line 43.
-LaTeX Font Info:    External font `cmex10' loaded for size
-(Font)              <6> on input line 43.
-[1
-
-{c:/texlive/2026/texmf-var/fonts/map/pdftex/updmap/pdftex.map}{c:/texlive/2026/
-texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc}{c:/texlive/2026/texmf-dist
-/fonts/enc/dvips/cm-super/cm-super-ts1.enc} <./overview.png>]
-Overfull \hbox (11.22548pt too wide) in paragraph at lines 84--85
+[2{c:/texlive/2026/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc}]
+Overfull \hbox (11.22548pt too wide) in paragraph at lines 113--114
 \T1/cmr/m/n/12 Über-tra-gungs-glied (H) um-fasst den ESP32-S3, den Mo-tortreibe
 r A4988 sowie den Schrittmo-
  []
 
-[2]
-Overfull \hbox (15.80347pt too wide) in paragraph at lines 144--145
+
+Overfull \hbox (15.80347pt too wide) in paragraph at lines 173--174
 []\T1/cmr/m/n/12 Im Gegen-satz zur Open-Loop-Steuerung er-möglicht dieses Ver-f
 ahren eine höhere Genauigkeit.
  []
 
-<hostpc.jpg, id=25, 1183.42125pt x 764.8575pt>
+[3]
+<hostpc.jpg, id=29, 1183.42125pt x 764.8575pt>
 File: hostpc.jpg Graphic file (type jpg)
 <use hostpc.jpg>
-Package pdftex.def Info: hostpc.jpg  used on input line 159.
+Package pdftex.def Info: hostpc.jpg  used on input line 188.
 (pdftex.def)             Requested size: 273.14923pt x 176.53207pt.
-[3 <./hostpc.jpg>] [4] (./week1.aux)
+ [4 <./hostpc.jpg>] (./week1.aux)
  ***********
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-01-19>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 13172 strings out of 467525
- 270681 string characters out of 5423209
- 659887 words of memory out of 5000000
- 41868 multiletter control sequences out of 15000+600000
+ 13176 strings out of 467525
+ 270758 string characters out of 5423209
+ 660887 words of memory out of 5000000
+ 41872 multiletter control sequences out of 15000+600000
  636649 words of font info for 60 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  84i,8n,104p,386b,715s stack positions out of 10000i,1000n,20000p,200000b,200000s
@@ -539,7 +545,7 @@ pe1/public/cm-super/sfbx1200.pfb><c:/texlive/2026/texmf-dist/fonts/type1/public
 sfrm1200.pfb><c:/texlive/2026/texmf-dist/fonts/type1/public/cm-super/sfrm1440.p
 fb><c:/texlive/2026/texmf-dist/fonts/type1/public/cm-super/sfrm2074.pfb><c:/tex
 live/2026/texmf-dist/fonts/type1/public/cm-super/sftt1200.pfb>
-Output written on week1.pdf (4 pages, 1078989 bytes).
+Output written on week1.pdf (4 pages, 1081058 bytes).
 PDF statistics:
  79 PDF objects out of 1000 (max. 8388607)
  48 compressed objects within 1 object stream

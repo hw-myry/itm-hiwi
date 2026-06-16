@@ -11,6 +11,10 @@ MainWindow::MainWindow(QWidget *parent)
 
     socket = new QTcpSocket(this);
 
+    // 默认IP和端口
+    ui->lineEditIP->setText("192.168.4.1");
+    ui->lineEditPort->setText("8080");
+
     ui->labelConnectStatus->setText("Disconnected");
     ui->labelConnectStatus->setStyleSheet("color:red; font-weight:bold;");
 
@@ -119,3 +123,17 @@ void MainWindow::sendRGB()
     socket->write(cmd.toUtf8());
     addLog("Send: " + cmd.trimmed());
 }
+void MainWindow::on_sendAngleButton_clicked()
+{
+    QString angle = ui->angleEdit->text();
+
+    if (angle.isEmpty())
+        return;
+
+    QString cmd = QString("ANGLE:%1\n").arg(angle);
+
+    socket->write(cmd.toUtf8());
+
+    addLog(QString("Send: %1").arg(cmd.trimmed()));
+}
+

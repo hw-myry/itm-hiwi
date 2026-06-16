@@ -23,6 +23,8 @@ private slots:
     void on_btnLedOn_clicked();
     void on_btnLedOff_clicked();
 
+    void on_sendAngleButton_clicked();
+
 private:
     Ui::MainWindow *ui;
     QTcpSocket *socket;

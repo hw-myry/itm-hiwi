@@ -4,8 +4,10 @@
 #define LED_PIN 10
 #define LED_COUNT 1
 
-const char* ssid = "MagentaWLAN-7LSH_2.4";
-const char* password = "44573549123221016562";
+// const char* ssid = "MagentaWLAN-7LSH_2.4";
+// const char* password = "44573549123221016562";
+
+const char* ssid = "Freifunk";
 
 WiFiServer server(8080);
 
@@ -32,7 +34,8 @@ void setup()
     pixels.clear();
     pixels.show();
 
-    WiFi.begin(ssid, password);
+    // WiFi.begin(ssid, password);
+    WiFi.begin(ssid);  // 无密码 WiFi
 
     Serial.print("Connecting WiFi");
 

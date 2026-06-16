@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>906</width>
-    <height>542</height>
+    <width>1210</width>
+    <height>776</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -297,10 +297,10 @@ font-weight: bold;</string>
    <widget class="QTextBrowser" name="textBrowserLog">
     <property name="geometry">
      <rect>
-      <x>400</x>
-      <y>230</y>
-      <width>481</width>
-      <height>231</height>
+      <x>420</x>
+      <y>240</y>
+      <width>691</width>
+      <height>171</height>
      </rect>
     </property>
    </widget>
@@ -339,13 +339,94 @@ font-weight: bold;</string>
      <string>Disconnected</string>
     </property>
    </widget>
+   <widget class="QLabel" name="labelPort_2">
+    <property name="geometry">
+     <rect>
+      <x>50</x>
+      <y>490</y>
+      <width>151</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">color: black;
+font-size: 20px;
+font-weight: bold;</string>
+    </property>
+    <property name="text">
+     <string>Motor Angle:</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="angleEdit">
+    <property name="geometry">
+     <rect>
+      <x>210</x>
+      <y>480</y>
+      <width>251</width>
+      <height>41</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="sendAngleButton">
+    <property name="geometry">
+     <rect>
+      <x>520</x>
+      <y>480</y>
+      <width>251</width>
+      <height>111</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">QPushButton {
+    background-color: #993333;
+    color: white;
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 16px;
+}</string>
+    </property>
+    <property name="text">
+     <string>Send Angle</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="labelPort_3">
+    <property name="geometry">
+     <rect>
+      <x>50</x>
+      <y>560</y>
+      <width>151</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">color: black;
+font-size: 20px;
+font-weight: bold;</string>
+    </property>
+    <property name="text">
+     <string>Current Angle:</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="currentAngleEdit">
+    <property name="geometry">
+     <rect>
+      <x>210</x>
+      <y>560</y>
+      <width>251</width>
+      <height>41</height>
+     </rect>
+    </property>
+    <property name="readOnly">
+     <bool>true</bool>
+    </property>
+   </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>906</width>
+     <width>1210</width>
      <height>22</height>
     </rect>
    </property>

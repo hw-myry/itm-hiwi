@@ -34,6 +34,35 @@ In dieser Woche wurde die Ansteuerung eines Schrittmotors mit einem ESP32-S3 umg
     \label{fig:overview}
 \end{figure}
 
+
+\section{Verwendete Komponenten}
+\begin{table}[H]
+\centering
+\caption{Verwendete Hardware-Komponenten}
+\begin{tabular}{lll}
+\toprule
+Komponente & Typ / Modell & Funktion \\
+\midrule
+Mikrocontroller & ESP32-S3 Dev Module & Hauptsteuerung \\
+Schrittmotor & 17HM5417 & Rotationsantrieb \\
+Motortreiber & A4988 & Ansteuerung des Schrittmotors \\
+Drehgeber & EC11 Encoder & Positionsrückmeldung \\
+Netzgerät & 12\,V DC-Netzteil & Versorgung des Motors \\
+DC/DC-Wandler & 12\,V / 5\,V & Spannungswandlung für ESP32-S3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Die Spannungsversorgung des Systems erfolgt über ein externes
+12\,V-Netzgerät. Der Schrittmotor wird über den A4988-Treiber direkt
+mit 12\,V betrieben.
+
+Da der ESP32-S3 eine niedrigere Versorgungsspannung benötigt,
+wird zusätzlich ein DC/DC-Wandler verwendet, der die Eingangsspannung
+von 12\,V auf 5\,V reduziert. Dadurch können sowohl die Steuerungselektronik
+als auch die Motoransteuerung aus derselben Spannungsquelle versorgt werden.
+
+
 \section{Schrittmotor und Motortreiber}
 
 Für den Versuchsaufbau wurde ein Schrittmotor des Typs \textbf{17HM5417} mit einem Schrittwinkel von \textbf{1,8°} verwendet. Die Ansteuerung erfolgte über den Motortreiber \textbf{A4988}.
