@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1210</width>
-    <height>776</height>
+    <width>1405</width>
+    <height>882</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -327,7 +327,7 @@ font-weight: bold;</string>
      <rect>
       <x>590</x>
       <y>100</y>
-      <width>141</width>
+      <width>121</width>
       <height>31</height>
      </rect>
     </property>
@@ -343,7 +343,7 @@ font-weight: bold;</string>
     <property name="geometry">
      <rect>
       <x>50</x>
-      <y>490</y>
+      <y>710</y>
       <width>151</width>
       <height>31</height>
      </rect>
@@ -361,7 +361,7 @@ font-weight: bold;</string>
     <property name="geometry">
      <rect>
       <x>210</x>
-      <y>480</y>
+      <y>700</y>
       <width>251</width>
       <height>41</height>
      </rect>
@@ -371,7 +371,7 @@ font-weight: bold;</string>
     <property name="geometry">
      <rect>
       <x>520</x>
-      <y>480</y>
+      <y>700</y>
       <width>251</width>
       <height>111</height>
      </rect>
@@ -393,7 +393,7 @@ font-weight: bold;</string>
     <property name="geometry">
      <rect>
       <x>50</x>
-      <y>560</y>
+      <y>780</y>
       <width>151</width>
       <height>31</height>
      </rect>
@@ -411,7 +411,7 @@ font-weight: bold;</string>
     <property name="geometry">
      <rect>
       <x>210</x>
-      <y>560</y>
+      <y>780</y>
       <width>251</width>
       <height>41</height>
      </rect>
@@ -420,13 +420,259 @@ font-weight: bold;</string>
      <bool>true</bool>
     </property>
    </widget>
+   <widget class="QLabel" name="labelPort_4">
+    <property name="geometry">
+     <rect>
+      <x>100</x>
+      <y>500</y>
+      <width>91</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">color: black;
+font-size: 20px;
+font-weight: bold;</string>
+    </property>
+    <property name="text">
+     <string>KP:</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="kpEdit">
+    <property name="geometry">
+     <rect>
+      <x>210</x>
+      <y>490</y>
+      <width>251</width>
+      <height>41</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="kiEdit">
+    <property name="geometry">
+     <rect>
+      <x>210</x>
+      <y>540</y>
+      <width>251</width>
+      <height>41</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLabel" name="labelPort_5">
+    <property name="geometry">
+     <rect>
+      <x>100</x>
+      <y>550</y>
+      <width>91</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">color: black;
+font-size: 20px;
+font-weight: bold;</string>
+    </property>
+    <property name="text">
+     <string>KI:</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="kdEdit">
+    <property name="geometry">
+     <rect>
+      <x>210</x>
+      <y>590</y>
+      <width>251</width>
+      <height>41</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLabel" name="labelPort_6">
+    <property name="geometry">
+     <rect>
+      <x>100</x>
+      <y>600</y>
+      <width>91</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">color: black;
+font-size: 20px;
+font-weight: bold;</string>
+    </property>
+    <property name="text">
+     <string>KD:</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="labelPort_7">
+    <property name="geometry">
+     <rect>
+      <x>500</x>
+      <y>550</y>
+      <width>91</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">color: black;
+font-size: 20px;
+font-weight: bold;</string>
+    </property>
+    <property name="text">
+     <string>Min Hz:</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="labelPort_8">
+    <property name="geometry">
+     <rect>
+      <x>500</x>
+      <y>600</y>
+      <width>91</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">color: black;
+font-size: 20px;
+font-weight: bold;</string>
+    </property>
+    <property name="text">
+     <string>Accel:</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="maxhzEdit">
+    <property name="geometry">
+     <rect>
+      <x>610</x>
+      <y>490</y>
+      <width>251</width>
+      <height>41</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="accelEdit">
+    <property name="geometry">
+     <rect>
+      <x>610</x>
+      <y>590</y>
+      <width>251</width>
+      <height>41</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLabel" name="labelPort_9">
+    <property name="geometry">
+     <rect>
+      <x>500</x>
+      <y>500</y>
+      <width>91</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">color: black;
+font-size: 20px;
+font-weight: bold;</string>
+    </property>
+    <property name="text">
+     <string>Max Hz:</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="minhzEdit">
+    <property name="geometry">
+     <rect>
+      <x>610</x>
+      <y>540</y>
+      <width>251</width>
+      <height>41</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="CPREdit">
+    <property name="geometry">
+     <rect>
+      <x>1070</x>
+      <y>490</y>
+      <width>251</width>
+      <height>41</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="toleranceEdit">
+    <property name="geometry">
+     <rect>
+      <x>1070</x>
+      <y>540</y>
+      <width>251</width>
+      <height>41</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLabel" name="labelPort_10">
+    <property name="geometry">
+     <rect>
+      <x>900</x>
+      <y>500</y>
+      <width>171</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">color: black;
+font-size: 20px;
+font-weight: bold;</string>
+    </property>
+    <property name="text">
+     <string>Encoder CPR:</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="labelPort_12">
+    <property name="geometry">
+     <rect>
+      <x>900</x>
+      <y>550</y>
+      <width>151</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">color: black;
+font-size: 20px;
+font-weight: bold;</string>
+    </property>
+    <property name="text">
+     <string>Tolerance:</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="btnSendParameter">
+    <property name="geometry">
+     <rect>
+      <x>870</x>
+      <y>700</y>
+      <width>251</width>
+      <height>111</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">QPushButton {
+    background-color: #333366;
+    color: white;
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 16px;
+}</string>
+    </property>
+    <property name="text">
+     <string>Send Parameter</string>
+    </property>
+   </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1210</width>
+     <width>1405</width>
      <height>22</height>
     </rect>
    </property>

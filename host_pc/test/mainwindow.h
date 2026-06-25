@@ -25,14 +25,40 @@ private slots:
 
     void on_sendAngleButton_clicked();
 
+    void on_btnApplyPid_clicked();
+    void on_btnApplySpeed_clicked();
+    void on_btnApplyEncoder_clicked();
+    void on_btnApplyTolerance_clicked();
+
+    void on_btnSendParameter_clicked();
+
+    void on_btnReadConfig_clicked();
+    void on_btnSaveConfig_clicked();
+    void on_btnResetConfig_clicked();
+
 private:
     Ui::MainWindow *ui;
     QTcpSocket *socket;
 
     bool ledOn = false;
 
+    // 用来缓存 TCP 接收数据，防止一次 readAll 收到多行或半行
+    QString rxBuffer;
+
     void sendRGB();
     void addLog(const QString &msg);
+
+    // =====================================================
+    // 新增：统一发送命令
+    // =====================================================
+    void sendCommand(const QString &cmd, bool showLog = true);
+
+    // =====================================================
+    // 新增：解析 ESP32 返回数据
+    // =====================================================
+    void handleEsp32Line(const QString &line);
+    void updateConfigEditsFromLine(const QString &line);
+    QString valueFromLine(const QString &line, const QString &key) const;
 };
 
 #endif // MAINWINDOW_H
