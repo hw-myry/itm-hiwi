@@ -29,16 +29,13 @@ MainWindow::MainWindow(QWidget *parent)
 
     // =====================================================
     // 默认参数显示
+    // PID + 单 Speed 参数
     // =====================================================
     ui->kpEdit->setText("5.0");
     ui->kiEdit->setText("0.015");
-
-
     ui->kdEdit->setText("0.0");
 
-    ui->maxhzEdit->setText("550");
-    ui->minhzEdit->setText("140");
-    ui->accelEdit->setText("4500");
+    ui->speedEdit->setText("500");
 
     ui->CPREdit->setText("40");
     ui->toleranceEdit->setText("4.5");
@@ -48,18 +45,33 @@ MainWindow::MainWindow(QWidget *parent)
     // =====================================================
     // 输入限制
     // =====================================================
-    ui->angleEdit->setValidator(new QDoubleValidator(-64800.0, 64800.0, 3, this));
+    ui->angleEdit->setValidator(
+        new QDoubleValidator(-64800.0, 64800.0, 3, this)
+        );
 
-    ui->kpEdit->setValidator(new QDoubleValidator(0.0, 30.0, 4, this));
-    ui->kiEdit->setValidator(new QDoubleValidator(0.0, 1.0, 6, this));
-    ui->kdEdit->setValidator(new QDoubleValidator(0.0, 5.0, 6, this));
+    ui->kpEdit->setValidator(
+        new QDoubleValidator(0.0, 100.0, 4, this)
+        );
 
-    ui->maxhzEdit->setValidator(new QDoubleValidator(1.0, 3000.0, 2, this));
-    ui->minhzEdit->setValidator(new QDoubleValidator(1.0, 3000.0, 2, this));
-    ui->accelEdit->setValidator(new QDoubleValidator(1.0, 30000.0, 2, this));
+    ui->kiEdit->setValidator(
+        new QDoubleValidator(0.0, 10.0, 6, this)
+        );
 
-    ui->CPREdit->setValidator(new QDoubleValidator(1.0, 10000.0, 4, this));
-    ui->toleranceEdit->setValidator(new QDoubleValidator(0.1, 30.0, 3, this));
+    ui->kdEdit->setValidator(
+        new QDoubleValidator(0.0, 10.0, 6, this)
+        );
+
+    ui->speedEdit->setValidator(
+        new QDoubleValidator(1.0, 3000.0, 2, this)
+        );
+
+    ui->CPREdit->setValidator(
+        new QDoubleValidator(1.0, 10000.0, 4, this)
+        );
+
+    ui->toleranceEdit->setValidator(
+        new QDoubleValidator(0.1, 30.0, 3, this)
+        );
 
     // =====================================================
     // 定时读取当前角度
@@ -83,7 +95,7 @@ MainWindow::MainWindow(QWidget *parent)
 
         addLog("Connected to ESP32");
 
-        // 连接后自动读取 Flash 里的配置
+        // 连接后自动读取 ESP32 当前配置
         QTimer::singleShot(200, this, [=]() {
             sendCommand("CFG?", true);
         });
@@ -127,20 +139,6 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->sliderR, &QSlider::valueChanged, this, &MainWindow::sendRGB);
     connect(ui->sliderG, &QSlider::valueChanged, this, &MainWindow::sendRGB);
     connect(ui->sliderB, &QSlider::valueChanged, this, &MainWindow::sendRGB);
-
-    // =====================================================
-    // 输入框按 Enter 直接发送参数
-    // =====================================================
-    connect(ui->kpEdit, &QLineEdit::returnPressed, this, &MainWindow::on_btnApplyPid_clicked);
-    connect(ui->kiEdit, &QLineEdit::returnPressed, this, &MainWindow::on_btnApplyPid_clicked);
-    connect(ui->kdEdit, &QLineEdit::returnPressed, this, &MainWindow::on_btnApplyPid_clicked);
-
-    connect(ui->maxhzEdit, &QLineEdit::returnPressed, this, &MainWindow::on_btnApplySpeed_clicked);
-    connect(ui->minhzEdit, &QLineEdit::returnPressed, this, &MainWindow::on_btnApplySpeed_clicked);
-    connect(ui->accelEdit, &QLineEdit::returnPressed, this, &MainWindow::on_btnApplySpeed_clicked);
-
-    connect(ui->CPREdit, &QLineEdit::returnPressed, this, &MainWindow::on_btnApplyEncoder_clicked);
-    connect(ui->toleranceEdit, &QLineEdit::returnPressed, this, &MainWindow::on_btnApplyTolerance_clicked);
 }
 
 MainWindow::~MainWindow()
@@ -212,25 +210,9 @@ void MainWindow::updateConfigEditsFromLine(const QString &line)
         ui->kdEdit->setText(v);
     }
 
-    v = valueFromLine(line, "MAXHZ");
-    if (v.isEmpty()) {
-        v = valueFromLine(line, "MAX");
-    }
+    v = valueFromLine(line, "SPEED");
     if (!v.isEmpty()) {
-        ui->maxhzEdit->setText(v);
-    }
-
-    v = valueFromLine(line, "MINHZ");
-    if (v.isEmpty()) {
-        v = valueFromLine(line, "MIN");
-    }
-    if (!v.isEmpty()) {
-        ui->minhzEdit->setText(v);
-    }
-
-    v = valueFromLine(line, "ACCEL");
-    if (!v.isEmpty()) {
-        ui->accelEdit->setText(v);
+        ui->speedEdit->setText(v);
     }
 
     v = valueFromLine(line, "CPR");
@@ -246,7 +228,7 @@ void MainWindow::updateConfigEditsFromLine(const QString &line)
 
 void MainWindow::handleEsp32Line(const QString &line)
 {
-    // CFG KP=... KI=... KD=... MAXHZ=... MINHZ=... ACCEL=... CPR=... TOL=...
+    // CFG KP=... KI=... KD=... SPEED=... CPR=... TOL=...
     if (line.startsWith("CFG ") ||
         line.startsWith("OK CFG_SAVE") ||
         line.startsWith("OK CFG_RESET")) {
@@ -260,8 +242,8 @@ void MainWindow::handleEsp32Line(const QString &line)
         return;
     }
 
-    // SPEED MAX=...
-    if (line.startsWith("SPEED ") || line.startsWith("OK SPEED")) {
+    // SPEED=... / OK SPEED=...
+    if (line.startsWith("SPEED") || line.startsWith("OK SPEED")) {
         updateConfigEditsFromLine(line);
         return;
     }
@@ -374,126 +356,28 @@ void MainWindow::on_sendAngleButton_clicked()
 }
 
 // =====================================================
-// Apply PID
-// 命令：PID:Kp,Ki,Kd
+// Save Parameter
+// 一个按钮：发送全部参数到 ESP32 RAM，然后保存到 Flash
+// 命令：
+// PID:Kp,Ki,Kd
+// SPEED:Speed
+// ENCODER:CPR
+// TOL:Tolerance
+// CFG_SAVE
 // =====================================================
-void MainWindow::on_btnApplyPid_clicked()
+void MainWindow::on_btnSaveParameter_clicked()
 {
     QString kp = ui->kpEdit->text().trimmed();
     QString ki = ui->kiEdit->text().trimmed();
     QString kd = ui->kdEdit->text().trimmed();
 
-    if (kp.isEmpty() || ki.isEmpty() || kd.isEmpty()) {
-        addLog("PID input empty");
-        return;
-    }
-
-    QString cmd = QString("PID:%1,%2,%3")
-                      .arg(kp)
-                      .arg(ki)
-                      .arg(kd);
-
-    sendCommand(cmd);
-}
-
-// =====================================================
-// Apply Speed
-// 命令：SPEED:maxHz,minHz,accel
-// =====================================================
-void MainWindow::on_btnApplySpeed_clicked()
-{
-    QString maxHz = ui->maxhzEdit->text().trimmed();
-    QString minHz = ui->minhzEdit->text().trimmed();
-    QString accel = ui->accelEdit->text().trimmed();
-
-    if (maxHz.isEmpty() || minHz.isEmpty() || accel.isEmpty()) {
-        addLog("Speed input empty");
-        return;
-    }
-
-    QString cmd = QString("SPEED:%1,%2,%3")
-                      .arg(maxHz)
-                      .arg(minHz)
-                      .arg(accel);
-
-    sendCommand(cmd);
-}
-
-// =====================================================
-// Apply Encoder CPR
-// 命令：ENCODER:40
-// =====================================================
-void MainWindow::on_btnApplyEncoder_clicked()
-{
-    QString cpr = ui->CPREdit->text().trimmed();
-
-    if (cpr.isEmpty()) {
-        addLog("Encoder CPR input empty");
-        return;
-    }
-
-    QString cmd = QString("ENCODER:%1").arg(cpr);
-    sendCommand(cmd);
-}
-
-// =====================================================
-// Apply Tolerance
-// 命令：TOL:4.5
-// =====================================================
-void MainWindow::on_btnApplyTolerance_clicked()
-{
-    QString tol = ui->toleranceEdit->text().trimmed();
-
-    if (tol.isEmpty()) {
-        addLog("Tolerance input empty");
-        return;
-    }
-
-    QString cmd = QString("TOL:%1").arg(tol);
-    sendCommand(cmd);
-}
-
-// =====================================================
-// Read Config
-// =====================================================
-void MainWindow::on_btnReadConfig_clicked()
-{
-    sendCommand("CFG?");
-}
-
-// =====================================================
-// Save Flash
-// =====================================================
-void MainWindow::on_btnSaveConfig_clicked()
-{
-    sendCommand("CFG_SAVE");
-}
-
-// =====================================================
-// Reset Config
-// =====================================================
-void MainWindow::on_btnResetConfig_clicked()
-{
-    sendCommand("CFG_RESET");
-}
-
-
-void MainWindow::on_btnSendParameter_clicked()
-{
-    QString kp = ui->kpEdit->text().trimmed();
-    QString ki = ui->kiEdit->text().trimmed();
-    QString kd = ui->kdEdit->text().trimmed();   // 如果你改名 kdEdit，这里换成 ui->kdEdit
-
-    QString maxHz = ui->maxhzEdit->text().trimmed();
-    QString minHz = ui->minhzEdit->text().trimmed();
-    QString accel = ui->accelEdit->text().trimmed();
+    QString speed = ui->speedEdit->text().trimmed();
 
     QString cpr = ui->CPREdit->text().trimmed();
     QString tol = ui->toleranceEdit->text().trimmed();
 
     if (kp.isEmpty() || ki.isEmpty() || kd.isEmpty() ||
-        maxHz.isEmpty() || minHz.isEmpty() || accel.isEmpty() ||
-        cpr.isEmpty() || tol.isEmpty()) {
+        speed.isEmpty() || cpr.isEmpty() || tol.isEmpty()) {
         addLog("Parameter input empty");
         return;
     }
@@ -501,39 +385,32 @@ void MainWindow::on_btnSendParameter_clicked()
     bool okKp = false;
     bool okKi = false;
     bool okKd = false;
-    bool okMax = false;
-    bool okMin = false;
-    bool okAccel = false;
+    bool okSpeed = false;
     bool okCpr = false;
     bool okTol = false;
 
     double kpVal = kp.toDouble(&okKp);
     double kiVal = ki.toDouble(&okKi);
     double kdVal = kd.toDouble(&okKd);
-    double maxVal = maxHz.toDouble(&okMax);
-    double minVal = minHz.toDouble(&okMin);
-    double accelVal = accel.toDouble(&okAccel);
+    double speedVal = speed.toDouble(&okSpeed);
     double cprVal = cpr.toDouble(&okCpr);
     double tolVal = tol.toDouble(&okTol);
 
     if (!okKp || !okKi || !okKd ||
-        !okMax || !okMin || !okAccel ||
-        !okCpr || !okTol) {
+        !okSpeed || !okCpr || !okTol) {
         addLog("Parameter format error");
         return;
     }
 
-    if (kpVal < 0 || kpVal > 30 ||
-        kiVal < 0 || kiVal > 1 ||
-        kdVal < 0 || kdVal > 5) {
+    if (kpVal < 0 || kpVal > 100 ||
+        kiVal < 0 || kiVal > 10 ||
+        kdVal < 0 || kdVal > 10) {
         addLog("PID range error");
         return;
     }
 
-    if (maxVal < 1 || maxVal > 3000 ||
-        minVal < 1 || minVal > maxVal ||
-        accelVal < 1 || accelVal > 30000) {
-        addLog("Speed range error: check Max Hz / Min Hz / Accel");
+    if (speedVal < 1 || speedVal > 3000) {
+        addLog("Speed range error");
         return;
     }
 
@@ -547,10 +424,14 @@ void MainWindow::on_btnSendParameter_clicked()
         return;
     }
 
+    // 1. 先把界面参数发到 ESP32 RAM
     sendCommand(QString("PID:%1,%2,%3").arg(kp).arg(ki).arg(kd));
-    sendCommand(QString("SPEED:%1,%2,%3").arg(maxHz).arg(minHz).arg(accel));
+    sendCommand(QString("SPEED:%1").arg(speed));
     sendCommand(QString("ENCODER:%1").arg(cpr));
     sendCommand(QString("TOL:%1").arg(tol));
 
-    addLog("All parameters sent to ESP32 RAM, not Flash");
+    // 2. 再保存 ESP32 当前 RAM 参数到 Flash
+    sendCommand("CFG_SAVE");
+
+    addLog("All parameters sent and saved to ESP32 Flash");
 }

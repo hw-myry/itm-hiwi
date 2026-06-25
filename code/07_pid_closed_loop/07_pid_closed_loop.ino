@@ -53,27 +53,14 @@ const float STEP_ANGLE = 1.8f;
 // =====================================================
 // 默认参数：Flash 没有保存过时使用
 // =====================================================
-const float DEFAULT_PID_KP = 5.0f;
-const float DEFAULT_PID_KI = 0.015f;
-const float DEFAULT_PID_KD = 0.0f;
-
-const float DEFAULT_PID_MAX_STEP_HZ = 550.0f;
-const float DEFAULT_PID_MIN_STEP_HZ = 140.0f;
-const float DEFAULT_PID_ACCEL = 4500.0f;
-
-const float DEFAULT_ENCODER_COUNTS_PER_REV = 42.35f;
+const float DEFAULT_SPEED_HZ = 500.0f;
+const float DEFAULT_ENCODER_COUNTS_PER_REV = 40.0f;
 const float DEFAULT_ANGLE_TOLERANCE = 4.5f;
 
 // =====================================================
 // 运行时参数：开机从 Flash 读取，也可以通过命令修改
 // =====================================================
-float pidKp = DEFAULT_PID_KP;
-float pidKi = DEFAULT_PID_KI;
-float pidKd = DEFAULT_PID_KD;
-
-float pidMaxStepHz = DEFAULT_PID_MAX_STEP_HZ;
-float pidMinStepHz = DEFAULT_PID_MIN_STEP_HZ;
-float pidAccelStepHzPerSec = DEFAULT_PID_ACCEL;
+float speedHz = DEFAULT_SPEED_HZ;
 
 float encoderCountsPerRev = DEFAULT_ENCODER_COUNTS_PER_REV;
 float encoderDegPerCount = 360.0f / DEFAULT_ENCODER_COUNTS_PER_REV;
@@ -83,23 +70,16 @@ float angleTolerance = DEFAULT_ANGLE_TOLERANCE;
 // =====================================================
 // 固定控制参数
 // =====================================================
-// I项只在小误差时启用，防止大角度运动时积分打满
-#define PID_I_ENABLE_ERROR_DEG 36.0f
-#define PID_INTEGRAL_LIMIT 80.0f
-
-// 连续多少次进入误差范围才算到位
-#define PID_SETTLE_COUNT 2
-
 // 单次运动超时
-#define PID_MOVE_TIMEOUT_MS 30000
+#define MOVE_TIMEOUT_MS 30000
 
 // 步数保护
-#define PID_MAX_STEP_MULTIPLIER 60
-#define PID_STEP_GUARD_EXTRA 6000
-#define PID_MIN_MAX_STEPS 10000
+#define MOVE_MAX_STEP_MULTIPLIER 80
+#define MOVE_STEP_GUARD_EXTRA 8000
+#define MOVE_MIN_MAX_STEPS 10000
 
 // 调试打印间隔，单位ms
-#define PID_DEBUG_INTERVAL_MS 800
+#define MOVE_DEBUG_INTERVAL_MS 800
 
 // 每隔多少ms主动让出CPU，防止 Task Watchdog 重启
 #define MOTOR_TASK_YIELD_INTERVAL_MS 30
@@ -186,12 +166,7 @@ void updateDerivedParams() {
 }
 
 String getConfigString() {
-  return "CFG KP=" + String(pidKp, 4) +
-         " KI=" + String(pidKi, 4) +
-         " KD=" + String(pidKd, 4) +
-         " MAXHZ=" + String(pidMaxStepHz, 1) +
-         " MINHZ=" + String(pidMinStepHz, 1) +
-         " ACCEL=" + String(pidAccelStepHzPerSec, 1) +
+  return "CFG SPEED=" + String(speedHz, 1) +
          " CPR=" + String(encoderCountsPerRev, 4) +
          " DEG_PER_COUNT=" + String(encoderDegPerCount, 4) +
          " TOL=" + String(angleTolerance, 2);
@@ -200,14 +175,7 @@ String getConfigString() {
 void loadConfigFromFlash() {
   prefs.begin("motorcfg", true);
 
-  pidKp = prefs.getFloat("kp", DEFAULT_PID_KP);
-  pidKi = prefs.getFloat("ki", DEFAULT_PID_KI);
-  pidKd = prefs.getFloat("kd", DEFAULT_PID_KD);
-
-  pidMaxStepHz = prefs.getFloat("maxhz", DEFAULT_PID_MAX_STEP_HZ);
-  pidMinStepHz = prefs.getFloat("minhz", DEFAULT_PID_MIN_STEP_HZ);
-  pidAccelStepHzPerSec = prefs.getFloat("accel", DEFAULT_PID_ACCEL);
-
+  speedHz = prefs.getFloat("speed", DEFAULT_SPEED_HZ);
   encoderCountsPerRev = prefs.getFloat("cpr", DEFAULT_ENCODER_COUNTS_PER_REV);
   angleTolerance = prefs.getFloat("tol", DEFAULT_ANGLE_TOLERANCE);
 
@@ -222,14 +190,7 @@ void loadConfigFromFlash() {
 void saveConfigToFlash() {
   prefs.begin("motorcfg", false);
 
-  prefs.putFloat("kp", pidKp);
-  prefs.putFloat("ki", pidKi);
-  prefs.putFloat("kd", pidKd);
-
-  prefs.putFloat("maxhz", pidMaxStepHz);
-  prefs.putFloat("minhz", pidMinStepHz);
-  prefs.putFloat("accel", pidAccelStepHzPerSec);
-
+  prefs.putFloat("speed", speedHz);
   prefs.putFloat("cpr", encoderCountsPerRev);
   prefs.putFloat("tol", angleTolerance);
 
@@ -240,14 +201,7 @@ void saveConfigToFlash() {
 }
 
 void resetConfigToDefault() {
-  pidKp = DEFAULT_PID_KP;
-  pidKi = DEFAULT_PID_KI;
-  pidKd = DEFAULT_PID_KD;
-
-  pidMaxStepHz = DEFAULT_PID_MAX_STEP_HZ;
-  pidMinStepHz = DEFAULT_PID_MIN_STEP_HZ;
-  pidAccelStepHzPerSec = DEFAULT_PID_ACCEL;
-
+  speedHz = DEFAULT_SPEED_HZ;
   encoderCountsPerRev = DEFAULT_ENCODER_COUNTS_PER_REV;
   angleTolerance = DEFAULT_ANGLE_TOLERANCE;
 
@@ -276,23 +230,6 @@ void oneStepWithDelay(bool dir, uint32_t halfPeriodUs) {
 
   digitalWrite(STEP_PIN, LOW);
   delayMicroseconds(halfPeriodUs);
-}
-
-// 误差越大，最低速度越高；防止后半段太慢
-float getAdaptiveMinStepHz(float absError) {
-  if (absError >= 120.0f) {
-    return 520.0f;
-  } else if (absError >= 90.0f) {
-    return 480.0f;
-  } else if (absError >= 45.0f) {
-    return 400.0f;
-  } else if (absError >= 18.0f) {
-    return 280.0f;
-  } else if (absError >= 9.0f) {
-    return 180.0f;
-  } else {
-    return pidMinStepHz;
-  }
 }
 
 // =====================================================
@@ -431,108 +368,32 @@ String handleCommand(String cmd) {
   }
 
   // =====================================================
-  // PID 查询
-  // =====================================================
-  if (cmd == "PID?") {
-    return "PID KP=" + String(pidKp, 4) +
-           " KI=" + String(pidKi, 4) +
-           " KD=" + String(pidKd, 4);
-  }
-
-  // =====================================================
-  // PID 设置：PID:Kp,Ki,Kd
-  // 例子：PID:5.0,0.015,0.0
-  // 只改 RAM，不立刻写 Flash
-  // =====================================================
-  if (cmd.startsWith("PID:")) {
-    String data = cmd.substring(4);
-    data.trim();
-
-    int p1 = data.indexOf(',');
-    int p2 = data.indexOf(',', p1 + 1);
-
-    if (p1 > 0 && p2 > p1) {
-      String kpStr = data.substring(0, p1);
-      String kiStr = data.substring(p1 + 1, p2);
-      String kdStr = data.substring(p2 + 1);
-
-      kpStr.trim();
-      kiStr.trim();
-      kdStr.trim();
-
-      if (isValidNumber(kpStr) && isValidNumber(kiStr) && isValidNumber(kdStr)) {
-        float newKp = kpStr.toFloat();
-        float newKi = kiStr.toFloat();
-        float newKd = kdStr.toFloat();
-
-        if (newKp < 0 || newKp > 100 ||
-            newKi < 0 || newKi > 10 ||
-            newKd < 0 || newKd > 10) {
-          return "ERR PID RANGE";
-        }
-
-        pidKp = newKp;
-        pidKi = newKi;
-        pidKd = newKd;
-
-        return "OK PID KP=" + String(pidKp, 4) +
-               " KI=" + String(pidKi, 4) +
-               " KD=" + String(pidKd, 4);
-      }
-    }
-
-    return "ERR PID FORMAT";
-  }
-
-  // =====================================================
   // 速度查询
   // =====================================================
   if (cmd == "SPEED?") {
-    return "SPEED MAX=" + String(pidMaxStepHz, 1) +
-           " MIN=" + String(pidMinStepHz, 1) +
-           " ACCEL=" + String(pidAccelStepHzPerSec, 1);
+    return "SPEED=" + String(speedHz, 1);
   }
 
   // =====================================================
-  // 速度设置：SPEED:maxHz,minHz,accel
-  // 例子：SPEED:550,140,4500
+  // 设置匀速速度
+  // 命令：SPEED:500
+  // 单位：step/s
   // 只改 RAM，不立刻写 Flash
   // =====================================================
   if (cmd.startsWith("SPEED:")) {
     String data = cmd.substring(6);
     data.trim();
 
-    int p1 = data.indexOf(',');
-    int p2 = data.indexOf(',', p1 + 1);
+    if (isValidNumber(data)) {
+      float newSpeed = data.toFloat();
 
-    if (p1 > 0 && p2 > p1) {
-      String maxStr = data.substring(0, p1);
-      String minStr = data.substring(p1 + 1, p2);
-      String accStr = data.substring(p2 + 1);
-
-      maxStr.trim();
-      minStr.trim();
-      accStr.trim();
-
-      if (isValidNumber(maxStr) && isValidNumber(minStr) && isValidNumber(accStr)) {
-        float newMaxHz = maxStr.toFloat();
-        float newMinHz = minStr.toFloat();
-        float newAccel = accStr.toFloat();
-
-        if (newMaxHz < 1 || newMaxHz > 3000 ||
-            newMinHz < 1 || newMinHz > newMaxHz ||
-            newAccel < 1 || newAccel > 30000) {
-          return "ERR SPEED RANGE";
-        }
-
-        pidMaxStepHz = newMaxHz;
-        pidMinStepHz = newMinHz;
-        pidAccelStepHzPerSec = newAccel;
-
-        return "OK SPEED MAX=" + String(pidMaxStepHz, 1) +
-               " MIN=" + String(pidMinStepHz, 1) +
-               " ACCEL=" + String(pidAccelStepHzPerSec, 1);
+      if (newSpeed < 1.0f || newSpeed > 3000.0f) {
+        return "ERR SPEED RANGE";
       }
+
+      speedHz = newSpeed;
+
+      return "OK SPEED=" + String(speedHz, 1);
     }
 
     return "ERR SPEED FORMAT";
@@ -547,7 +408,7 @@ String handleCommand(String cmd) {
   }
 
   // =====================================================
-  // 编码器比例设置：ENCODER:42.35
+  // 编码器比例设置：ENCODER:40
   // 只改 RAM，不立刻写 Flash
   // =====================================================
   if (cmd.startsWith("ENCODER:")) {
@@ -694,7 +555,7 @@ void serialTask(void* pvParameters) {
 }
 
 // =====================================================
-// PI / PID Closed Loop Motor Task
+// Constant Speed Closed Loop Motor Task
 // =====================================================
 void closedLoopTask(void* pvParameters) {
   float moveAngle;
@@ -705,33 +566,46 @@ void closedLoopTask(void* pvParameters) {
       float startAngle = getRealAngleTotal();
       float targetAngle = startAngle + moveAngle;
 
-      Serial.print("PI Move: ");
+      Serial.print("Const Speed Move: ");
       Serial.print(moveAngle);
       Serial.print(" deg | Start: ");
       Serial.print(startAngle);
       Serial.print(" deg | Target: ");
-      Serial.println(targetAngle);
-
-      float integral = 0.0f;
-      float lastError = targetAngle - getRealAngleTotal();
-      float currentStepHz = 0.0f;
+      Serial.print(targetAngle);
+      Serial.print(" deg | Speed: ");
+      Serial.print(speedHz);
+      Serial.println(" step/s");
 
       long stepCounter = 0;
       long expectedSteps = lround(fabs(moveAngle) / STEP_ANGLE);
 
       long maxAllowedSteps =
-        expectedSteps * PID_MAX_STEP_MULTIPLIER + PID_STEP_GUARD_EXTRA;
+        expectedSteps * MOVE_MAX_STEP_MULTIPLIER + MOVE_STEP_GUARD_EXTRA;
 
-      if (maxAllowedSteps < PID_MIN_MAX_STEPS) {
-        maxAllowedSteps = PID_MIN_MAX_STEPS;
+      if (maxAllowedSteps < MOVE_MIN_MAX_STEPS) {
+        maxAllowedSteps = MOVE_MIN_MAX_STEPS;
       }
 
-      int settleCounter = 0;
-
       unsigned long startMs = millis();
-      unsigned long lastMicros = micros();
       unsigned long lastDebugMs = millis();
       unsigned long lastYieldMs = millis();
+
+      float usedSpeedHz = speedHz;
+
+      if (usedSpeedHz < 1.0f) {
+        usedSpeedHz = 1.0f;
+      }
+
+      if (usedSpeedHz > 3000.0f) {
+        usedSpeedHz = 3000.0f;
+      }
+
+      uint32_t halfPeriodUs =
+        (uint32_t)(1000000.0f / usedSpeedHz / 2.0f);
+
+      if (halfPeriodUs < 50) {
+        halfPeriodUs = 50;
+      }
 
       while (true) {
         float currentAngle = getRealAngleTotal();
@@ -742,31 +616,20 @@ void closedLoopTask(void* pvParameters) {
         // 到位判断
         // =====================================================
         if (absError <= angleTolerance) {
-          settleCounter++;
-          currentStepHz = 0.0f;
-          integral = 0.0f;
-
-          if (settleCounter >= PID_SETTLE_COUNT) {
-            Serial.print("Arrived. Angle: ");
-            Serial.print(currentAngle);
-            Serial.print(" deg | Error: ");
-            Serial.print(error);
-            Serial.print(" deg | Steps: ");
-            Serial.println(stepCounter);
-            break;
-          }
-
-          vTaskDelay(pdMS_TO_TICKS(20));
-          continue;
-        } else {
-          settleCounter = 0;
+          Serial.print("Arrived. Angle: ");
+          Serial.print(currentAngle);
+          Serial.print(" deg | Error: ");
+          Serial.print(error);
+          Serial.print(" deg | Steps: ");
+          Serial.println(stepCounter);
+          break;
         }
 
         // =====================================================
         // 超时保护
         // =====================================================
-        if (millis() - startMs > PID_MOVE_TIMEOUT_MS) {
-          Serial.print("ERR: PI move timeout | Current: ");
+        if (millis() - startMs > MOVE_TIMEOUT_MS) {
+          Serial.print("ERR: const speed move timeout | Current: ");
           Serial.print(currentAngle);
           Serial.print(" deg | Error: ");
           Serial.println(error);
@@ -783,128 +646,38 @@ void closedLoopTask(void* pvParameters) {
           Serial.print(error);
           Serial.print(" | Steps: ");
           Serial.println(stepCounter);
-          Serial.println("Check STEP_ANGLE / microstep / motor direction / encoder direction");
+          Serial.println("Check STEP_ANGLE / speed / encoder direction / mechanical jam");
           break;
         }
 
         // =====================================================
-        // dt
+        // 根据误差方向决定转向
         // =====================================================
-        unsigned long nowMicros = micros();
-        float dt = (nowMicros - lastMicros) / 1000000.0f;
-        lastMicros = nowMicros;
-
-        if (dt <= 0.0005f) {
-          dt = 0.0005f;
-        }
-
-        // =====================================================
-        // I项处理
-        // =====================================================
-        if (error * lastError < 0) {
-          // 越过目标，清积分
-          integral = 0.0f;
-          currentStepHz = 0.0f;
-        }
-
-        float derivative = (error - lastError) / dt;
-        lastError = error;
-
-        if (absError <= PID_I_ENABLE_ERROR_DEG) {
-          integral += error * dt;
-          integral = constrain(
-            integral,
-            -PID_INTEGRAL_LIMIT,
-            PID_INTEGRAL_LIMIT
-          );
-        } else {
-          integral = 0.0f;
-        }
-
-        // =====================================================
-        // PI / PID 输出
-        // =====================================================
-        float pidOutputDegPerSec =
-          pidKp * error +
-          pidKi * integral +
-          pidKd * derivative;
-
-        float maxSpeedDegPerSec = pidMaxStepHz * STEP_ANGLE;
-
-        pidOutputDegPerSec = constrain(
-          pidOutputDegPerSec,
-          -maxSpeedDegPerSec,
-          maxSpeedDegPerSec
-        );
-
-        bool dir = pidOutputDegPerSec > 0;
-
-        float targetStepHz = fabs(pidOutputDegPerSec) / STEP_ANGLE;
-
-        // 自适应最低速度：解决后半段太慢
-        float minStepHz = getAdaptiveMinStepHz(absError);
-
-        if (targetStepHz < minStepHz) {
-          targetStepHz = minStepHz;
-        }
-
-        if (targetStepHz > pidMaxStepHz) {
-          targetStepHz = pidMaxStepHz;
-        }
-
-        // =====================================================
-        // 加速度限制
-        // =====================================================
-        float maxDeltaHz = pidAccelStepHzPerSec * dt;
-
-        if (targetStepHz > currentStepHz + maxDeltaHz) {
-          currentStepHz += maxDeltaHz;
-        } else if (targetStepHz < currentStepHz - maxDeltaHz) {
-          currentStepHz -= maxDeltaHz;
-        } else {
-          currentStepHz = targetStepHz;
-        }
-
-        if (currentStepHz < minStepHz) {
-          currentStepHz = minStepHz;
-        }
-
-        if (currentStepHz > pidMaxStepHz) {
-          currentStepHz = pidMaxStepHz;
-        }
-
-        uint32_t halfPeriodUs =
-          (uint32_t)(1000000.0f / currentStepHz / 2.0f);
-
-        if (halfPeriodUs < 50) {
-          halfPeriodUs = 50;
-        }
+        bool dir = error > 0;
 
         oneStepWithDelay(dir, halfPeriodUs);
         stepCounter++;
 
         // =====================================================
-        // 调试打印，按时间打印，避免串口拖慢
+        // 调试打印
         // =====================================================
         unsigned long nowMs = millis();
 
-        if (nowMs - lastDebugMs >= PID_DEBUG_INTERVAL_MS) {
+        if (nowMs - lastDebugMs >= MOVE_DEBUG_INTERVAL_MS) {
           lastDebugMs = nowMs;
 
-          Serial.print("PI Debug | Current: ");
+          Serial.print("Move Debug | Current: ");
           Serial.print(currentAngle);
           Serial.print(" deg | Error: ");
           Serial.print(error);
-          Serial.print(" deg | I: ");
-          Serial.print(integral);
-          Serial.print(" | Hz: ");
-          Serial.print(currentStepHz);
+          Serial.print(" deg | Speed: ");
+          Serial.print(usedSpeedHz);
           Serial.print(" | Dir: ");
           Serial.println(dir ? "POS" : "NEG");
         }
 
         // =====================================================
-        // 主动让出CPU，防止 Task Watchdog 重启
+        // 防止 Task Watchdog
         // =====================================================
         if (nowMs - lastYieldMs >= MOTOR_TASK_YIELD_INTERVAL_MS) {
           lastYieldMs = nowMs;
@@ -1015,7 +788,7 @@ void setup() {
 
   xTaskCreatePinnedToCore(
     closedLoopTask,
-    "PI Closed Loop",
+    "Const Speed Task",
     8192,
     NULL,
     2,
@@ -1034,7 +807,7 @@ void setup() {
   );
 
   Serial.println("Input angle via Serial or WiFi, e.g. 90 / -180 / ANGLE:45");
-  Serial.println("Config commands: CFG? / CFG_SAVE / CFG_RESET / PID? / SPEED? / ENCODER? / TOL?");
+  Serial.println("Config commands: CFG? / CFG_SAVE / CFG_RESET / SPEED? / ENCODER? / TOL?");
 }
 
 // =====================================================

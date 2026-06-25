@@ -25,20 +25,12 @@ private slots:
 
     void on_sendAngleButton_clicked();
 
-    void on_btnApplyPid_clicked();
-    void on_btnApplySpeed_clicked();
-    void on_btnApplyEncoder_clicked();
-    void on_btnApplyTolerance_clicked();
-
-    void on_btnSendParameter_clicked();
-
-    void on_btnReadConfig_clicked();
-    void on_btnSaveConfig_clicked();
-    void on_btnResetConfig_clicked();
+    // 一个按钮：发送全部参数，并保存到 ESP32 Flash
+    void on_btnSaveParameter_clicked();
 
 private:
     Ui::MainWindow *ui;
-    QTcpSocket *socket;
+    QTcpSocket *socket = nullptr;
 
     bool ledOn = false;
 
@@ -48,14 +40,10 @@ private:
     void sendRGB();
     void addLog(const QString &msg);
 
-    // =====================================================
-    // 新增：统一发送命令
-    // =====================================================
+    // 统一发送命令
     void sendCommand(const QString &cmd, bool showLog = true);
 
-    // =====================================================
-    // 新增：解析 ESP32 返回数据
-    // =====================================================
+    // 解析 ESP32 返回数据
     void handleEsp32Line(const QString &line);
     void updateConfigEditsFromLine(const QString &line);
     QString valueFromLine(const QString &line, const QString &key) const;
