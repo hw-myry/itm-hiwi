@@ -48,19 +48,30 @@ bool ledEnabled = false;
 
 // 如果驱动器没有细分，1个STEP = 1.8度
 // 如果16细分，改成：1.8 / 16.0
-const float STEP_ANGLE = 1.8f;
+const float STEP_ANGLE = 1.8f ;
 
 // =====================================================
 // 默认参数：Flash 没有保存过时使用
 // =====================================================
+const float DEFAULT_KP = 5.0f;
+const float DEFAULT_KI = 0.015f;
+const float DEFAULT_KD = 0.0f;
+
 const float DEFAULT_SPEED_HZ = 500.0f;
+// PID输出很小时的最低步进速度，避免快到目标时速度过慢
+const float DEFAULT_MIN_SPEED_HZ = 180.0f;
 const float DEFAULT_ENCODER_COUNTS_PER_REV = 40.0f;
 const float DEFAULT_ANGLE_TOLERANCE = 4.5f;
 
 // =====================================================
 // 运行时参数：开机从 Flash 读取，也可以通过命令修改
 // =====================================================
+float pidKp = DEFAULT_KP;
+float pidKi = DEFAULT_KI;
+float pidKd = DEFAULT_KD;
+
 float speedHz = DEFAULT_SPEED_HZ;
+float minSpeedHz = DEFAULT_MIN_SPEED_HZ;
 
 float encoderCountsPerRev = DEFAULT_ENCODER_COUNTS_PER_REV;
 float encoderDegPerCount = 360.0f / DEFAULT_ENCODER_COUNTS_PER_REV;
@@ -166,7 +177,11 @@ void updateDerivedParams() {
 }
 
 String getConfigString() {
-  return "CFG SPEED=" + String(speedHz, 1) +
+  return "CFG KP=" + String(pidKp, 4) +
+         " KI=" + String(pidKi, 6) +
+         " KD=" + String(pidKd, 6) +
+         " SPEED=" + String(speedHz, 1) +
+         " MIN_SPEED=" + String(minSpeedHz, 1) +
          " CPR=" + String(encoderCountsPerRev, 4) +
          " DEG_PER_COUNT=" + String(encoderDegPerCount, 4) +
          " TOL=" + String(angleTolerance, 2);
@@ -175,7 +190,12 @@ String getConfigString() {
 void loadConfigFromFlash() {
   prefs.begin("motorcfg", true);
 
+  pidKp = prefs.getFloat("kp", DEFAULT_KP);
+  pidKi = prefs.getFloat("ki", DEFAULT_KI);
+  pidKd = prefs.getFloat("kd", DEFAULT_KD);
+
   speedHz = prefs.getFloat("speed", DEFAULT_SPEED_HZ);
+  minSpeedHz = prefs.getFloat("minspd", DEFAULT_MIN_SPEED_HZ);
   encoderCountsPerRev = prefs.getFloat("cpr", DEFAULT_ENCODER_COUNTS_PER_REV);
   angleTolerance = prefs.getFloat("tol", DEFAULT_ANGLE_TOLERANCE);
 
@@ -190,7 +210,12 @@ void loadConfigFromFlash() {
 void saveConfigToFlash() {
   prefs.begin("motorcfg", false);
 
+  prefs.putFloat("kp", pidKp);
+  prefs.putFloat("ki", pidKi);
+  prefs.putFloat("kd", pidKd);
+
   prefs.putFloat("speed", speedHz);
+  prefs.putFloat("minspd", minSpeedHz);
   prefs.putFloat("cpr", encoderCountsPerRev);
   prefs.putFloat("tol", angleTolerance);
 
@@ -201,7 +226,12 @@ void saveConfigToFlash() {
 }
 
 void resetConfigToDefault() {
+  pidKp = DEFAULT_KP;
+  pidKi = DEFAULT_KI;
+  pidKd = DEFAULT_KD;
+
   speedHz = DEFAULT_SPEED_HZ;
+  minSpeedHz = DEFAULT_MIN_SPEED_HZ;
   encoderCountsPerRev = DEFAULT_ENCODER_COUNTS_PER_REV;
   angleTolerance = DEFAULT_ANGLE_TOLERANCE;
 
@@ -368,6 +398,63 @@ String handleCommand(String cmd) {
   }
 
   // =====================================================
+  // PID 查询
+  // =====================================================
+  if (cmd == "PID?") {
+    return "PID KP=" + String(pidKp, 4) +
+           " KI=" + String(pidKi, 6) +
+           " KD=" + String(pidKd, 6);
+  }
+
+  // =====================================================
+  // PID 设置
+  // 命令：PID:5.0,0.015,0.0
+  // 只改 RAM，不立刻写 Flash
+  // =====================================================
+  if (cmd.startsWith("PID:")) {
+    String data = cmd.substring(4);
+    data.trim();
+
+    int p1 = data.indexOf(',');
+    int p2 = data.indexOf(',', p1 + 1);
+
+    if (p1 > 0 && p2 > p1) {
+      String kpStr = data.substring(0, p1);
+      String kiStr = data.substring(p1 + 1, p2);
+      String kdStr = data.substring(p2 + 1);
+
+      kpStr.trim();
+      kiStr.trim();
+      kdStr.trim();
+
+      if (isValidNumber(kpStr) &&
+          isValidNumber(kiStr) &&
+          isValidNumber(kdStr)) {
+
+        float newKp = kpStr.toFloat();
+        float newKi = kiStr.toFloat();
+        float newKd = kdStr.toFloat();
+
+        if (newKp < 0.0f || newKp > 100.0f ||
+            newKi < 0.0f || newKi > 10.0f ||
+            newKd < 0.0f || newKd > 10.0f) {
+          return "ERR PID RANGE";
+        }
+
+        pidKp = newKp;
+        pidKi = newKi;
+        pidKd = newKd;
+
+        return "OK PID KP=" + String(pidKp, 4) +
+               " KI=" + String(pidKi, 6) +
+               " KD=" + String(pidKd, 6);
+      }
+    }
+
+    return "ERR PID FORMAT";
+  }
+
+  // =====================================================
   // 速度查询
   // =====================================================
   if (cmd == "SPEED?") {
@@ -398,6 +485,45 @@ String handleCommand(String cmd) {
 
     return "ERR SPEED FORMAT";
   }
+
+  // =====================================================
+  // 最低速度查询
+  // PID 输出很小时，至少用这个 step/s 运行，避免接近目标太慢
+  // =====================================================
+  if (cmd == "MINSPEED?" || cmd == "MIN_SPEED?") {
+    return "MIN_SPEED=" + String(minSpeedHz, 1);
+  }
+
+  // =====================================================
+  // 最低速度设置：MINSPEED:180
+  // 只改 RAM，不立刻写 Flash
+  // =====================================================
+  if (cmd.startsWith("MINSPEED:") || cmd.startsWith("MIN_SPEED:")) {
+    String data;
+
+    if (cmd.startsWith("MINSPEED:")) {
+      data = cmd.substring(9);
+    } else {
+      data = cmd.substring(10);
+    }
+
+    data.trim();
+
+    if (isValidNumber(data)) {
+      float newMinSpeed = data.toFloat();
+
+      if (newMinSpeed < 1.0f || newMinSpeed > 3000.0f) {
+        return "ERR MINSPEED RANGE";
+      }
+
+      minSpeedHz = newMinSpeed;
+
+      return "OK MIN_SPEED=" + String(minSpeedHz, 1);
+    }
+
+    return "ERR MINSPEED FORMAT";
+  }
+
 
   // =====================================================
   // 编码器查询
@@ -566,15 +692,22 @@ void closedLoopTask(void* pvParameters) {
       float startAngle = getRealAngleTotal();
       float targetAngle = startAngle + moveAngle;
 
-      Serial.print("Const Speed Move: ");
+      Serial.print("PID Move: ");
       Serial.print(moveAngle);
       Serial.print(" deg | Start: ");
       Serial.print(startAngle);
       Serial.print(" deg | Target: ");
       Serial.print(targetAngle);
-      Serial.print(" deg | Speed: ");
+      Serial.print(" deg | MaxSpeed: ");
       Serial.print(speedHz);
-      Serial.println(" step/s");
+      Serial.print(" step/s | MinSpeed: ");
+      Serial.print(minSpeedHz);
+      Serial.print(" step/s | PID KP=");
+      Serial.print(pidKp);
+      Serial.print(" KI=");
+      Serial.print(pidKi);
+      Serial.print(" KD=");
+      Serial.println(pidKd);
 
       long stepCounter = 0;
       long expectedSteps = lround(fabs(moveAngle) / STEP_ANGLE);
@@ -590,22 +723,25 @@ void closedLoopTask(void* pvParameters) {
       unsigned long lastDebugMs = millis();
       unsigned long lastYieldMs = millis();
 
-      float usedSpeedHz = speedHz;
-
-      if (usedSpeedHz < 1.0f) {
-        usedSpeedHz = 1.0f;
+      float maxSpeedHz = speedHz;
+      if (maxSpeedHz < 1.0f) {
+        maxSpeedHz = 1.0f;
+      }
+      if (maxSpeedHz > 3000.0f) {
+        maxSpeedHz = 3000.0f;
       }
 
-      if (usedSpeedHz > 3000.0f) {
-        usedSpeedHz = 3000.0f;
+      float localMinSpeedHz = minSpeedHz;
+      if (localMinSpeedHz < 1.0f) {
+        localMinSpeedHz = 1.0f;
+      }
+      if (localMinSpeedHz > maxSpeedHz) {
+        localMinSpeedHz = maxSpeedHz;
       }
 
-      uint32_t halfPeriodUs =
-        (uint32_t)(1000000.0f / usedSpeedHz / 2.0f);
-
-      if (halfPeriodUs < 50) {
-        halfPeriodUs = 50;
-      }
+      float integral = 0.0f;
+      float lastError = targetAngle - startAngle;
+      unsigned long lastPidUs = micros();
 
       while (true) {
         float currentAngle = getRealAngleTotal();
@@ -629,7 +765,7 @@ void closedLoopTask(void* pvParameters) {
         // 超时保护
         // =====================================================
         if (millis() - startMs > MOVE_TIMEOUT_MS) {
-          Serial.print("ERR: const speed move timeout | Current: ");
+          Serial.print("ERR: pid move timeout | Current: ");
           Serial.print(currentAngle);
           Serial.print(" deg | Error: ");
           Serial.println(error);
@@ -651,9 +787,75 @@ void closedLoopTask(void* pvParameters) {
         }
 
         // =====================================================
-        // 根据误差方向决定转向
+        // PID 计算
+        // 改进点：
+        // 1. 方向只由当前位置误差决定，避免积分项把电机继续推过头
+        // 2. 误差过零时清积分，防止 windup 导致第二圈越走越多
+        // 3. PID 输出很小时使用 minSpeedHz，避免接近目标时过慢
         // =====================================================
-        bool dir = error > 0;
+        unsigned long nowUs = micros();
+        float dt = (nowUs - lastPidUs) / 1000000.0f;
+
+        if (dt <= 0.0f || dt > 1.0f) {
+          dt = 0.001f;
+        }
+
+        lastPidUs = nowUs;
+
+        bool errorCrossedZero =
+          (error > 0.0f && lastError < 0.0f) ||
+          (error < 0.0f && lastError > 0.0f);
+
+        float derivative = 0.0f;
+
+        if (errorCrossedZero) {
+          integral = 0.0f;
+          derivative = 0.0f;
+        } else {
+          derivative = (error - lastError) / dt;
+        }
+
+        integral += error * dt;
+
+        // 积分限幅：I 项最多占最大速度的 35%，避免越过目标后继续被积分项推着走
+        if (pidKi > 0.000001f) {
+          float integralLimit = (maxSpeedHz * 0.35f) / pidKi;
+          if (integralLimit < 1.0f) {
+            integralLimit = 1.0f;
+          }
+          if (integral > integralLimit) {
+            integral = integralLimit;
+          }
+          if (integral < -integralLimit) {
+            integral = -integralLimit;
+          }
+        } else {
+          integral = 0.0f;
+        }
+
+        lastError = error;
+
+        float pidOutput = pidKp * error + pidKi * integral + pidKd * derivative;
+
+        // 方向只看实际误差，PID 输出只决定速度大小
+        bool dir = error > 0.0f;
+
+        float usedSpeedHz = fabs(pidOutput);
+
+        if (usedSpeedHz < localMinSpeedHz) {
+          usedSpeedHz = localMinSpeedHz;
+        }
+
+        if (usedSpeedHz > maxSpeedHz) {
+          usedSpeedHz = maxSpeedHz;
+        }
+
+        uint32_t halfPeriodUs =
+          (uint32_t)(1000000.0f / usedSpeedHz / 2.0f);
+
+        if (halfPeriodUs < 50) {
+          halfPeriodUs = 50;
+        }
 
         oneStepWithDelay(dir, halfPeriodUs);
         stepCounter++;
@@ -672,6 +874,8 @@ void closedLoopTask(void* pvParameters) {
           Serial.print(error);
           Serial.print(" deg | Speed: ");
           Serial.print(usedSpeedHz);
+          Serial.print(" | I: ");
+          Serial.print(integral);
           Serial.print(" | Dir: ");
           Serial.println(dir ? "POS" : "NEG");
         }
@@ -788,7 +992,7 @@ void setup() {
 
   xTaskCreatePinnedToCore(
     closedLoopTask,
-    "Const Speed Task",
+    "PID Task",
     8192,
     NULL,
     2,
@@ -807,7 +1011,7 @@ void setup() {
   );
 
   Serial.println("Input angle via Serial or WiFi, e.g. 90 / -180 / ANGLE:45");
-  Serial.println("Config commands: CFG? / CFG_SAVE / CFG_RESET / SPEED? / ENCODER? / TOL?");
+  Serial.println("Config commands: CFG? / CFG_SAVE / CFG_RESET / PID? / SPEED? / MINSPEED? / ENCODER? / TOL?");
 }
 
 // =====================================================
