@@ -31,6 +31,17 @@ Preferences prefs;
 const uint32_t CONFIG_VERSION = 3;
 
 // =====================================================
+// Flash 当前位置 / 单方向回零参数
+// =====================================================
+// savedHomeOffsetAngle 表示“当前位置相对零点的角度”，只保存 0~360 度。
+// 约定：右转为正，左转为负，保存时自动取 360 度余数。
+// 例如：右转90 => 90；重启后自动继续右转 360 - 90 = 270 度回零。
+// 例如：右转120再左转60 => 60；重启后自动右转300度回零。
+const char* FLASH_KEY_HOME_ANGLE = "homeang";
+const float AUTO_HOME_MIN_ANGLE = 0.5f;      // 小于这个角度就认为不用回零
+const float POSITION_ZERO_EPS = 0.5f;        // 接近0或360时保存成0
+
+// =====================================================
 // LED
 // =====================================================
 #define LED_PIN 48
@@ -82,6 +93,9 @@ float encoderDegPerCount = 360.0f / DEFAULT_ENCODER_COUNTS_PER_REV;
 
 float angleTolerance = DEFAULT_ANGLE_TOLERANCE;
 
+// 保存到 Flash 的当前位置角度：范围 0~360，表示从零点开始正方向转到当前点
+float savedHomeOffsetAngle = 0.0f;
+
 // =====================================================
 // 固定控制参数
 // =====================================================
@@ -106,6 +120,12 @@ float angleTolerance = DEFAULT_ANGLE_TOLERANCE;
 // =====================================================
 // FreeRTOS
 // =====================================================
+struct MotorMoveCommand {
+  float angle;          // 相对运动角度，右转为正，左转为负
+  bool zeroAfterMove;   // 这次运动完成后是否把累计角度清零
+  bool savePosition;    // 这次运动结束后是否更新 Flash 里的累计角度
+};
+
 QueueHandle_t targetQueue;
 
 volatile long encoderCount = 0;
@@ -164,6 +184,12 @@ long getEncoderCount() {
   return countCopy;
 }
 
+void setEncoderCount(long newCount) {
+  noInterrupts();
+  encoderCount = newCount;
+  interrupts();
+}
+
 float getRealAngleTotal() {
   long countCopy = getEncoderCount();
   return countCopy * encoderDegPerCount;
@@ -188,7 +214,8 @@ String getConfigString() {
          " MIN_SPEED=" + String(minSpeedHz, 1) +
          " CPR=" + String(encoderCountsPerRev, 4) +
          " DEG_PER_COUNT=" + String(encoderDegPerCount, 4) +
-         " TOL=" + String(angleTolerance, 2);
+         " TOL=" + String(angleTolerance, 2) +
+         " HOME_POS=" + String(savedHomeOffsetAngle, 2);
 }
 
 void loadConfigFromFlash() {
@@ -205,7 +232,21 @@ void loadConfigFromFlash() {
   encoderCountsPerRev = prefs.getFloat("cpr", DEFAULT_ENCODER_COUNTS_PER_REV);
   angleTolerance = prefs.getFloat("tol", DEFAULT_ANGLE_TOLERANCE);
 
+  savedHomeOffsetAngle = prefs.getFloat(FLASH_KEY_HOME_ANGLE, 0.0f);
+
   prefs.end();
+
+  if (savedHomeOffsetAngle < -64800.0f || savedHomeOffsetAngle > 64800.0f) {
+    Serial.println("Saved home position out of range, reset to 0");
+    savedHomeOffsetAngle = 0.0f;
+  }
+
+  savedHomeOffsetAngle = normalizeAngle(savedHomeOffsetAngle);
+
+  if (savedHomeOffsetAngle <= POSITION_ZERO_EPS ||
+      savedHomeOffsetAngle >= 360.0f - POSITION_ZERO_EPS) {
+    savedHomeOffsetAngle = 0.0f;
+  }
 
   // 如果是旧版本保存的配置，自动把速度相关参数升级到 v3 的快速默认值。
   // 这样烧录新程序后不会继续沿用 v2 中保存的 500 / 180 慢速参数。
@@ -240,6 +281,7 @@ void saveConfigToFlash() {
   prefs.putFloat("minspd", minSpeedHz);
   prefs.putFloat("cpr", encoderCountsPerRev);
   prefs.putFloat("tol", angleTolerance);
+  prefs.putFloat(FLASH_KEY_HOME_ANGLE, savedHomeOffsetAngle);
 
   prefs.end();
 
@@ -256,6 +298,7 @@ void resetConfigToDefault() {
   minSpeedHz = DEFAULT_MIN_SPEED_HZ;
   encoderCountsPerRev = DEFAULT_ENCODER_COUNTS_PER_REV;
   angleTolerance = DEFAULT_ANGLE_TOLERANCE;
+  savedHomeOffsetAngle = 0.0f;
 
   updateDerivedParams();
 
@@ -264,6 +307,54 @@ void resetConfigToDefault() {
   prefs.end();
 
   Serial.println("Config reset to default");
+}
+
+float getAutoHomeMoveAngle() {
+  float pos = normalizeAngle(savedHomeOffsetAngle);
+
+  if (pos <= POSITION_ZERO_EPS || pos >= 360.0f - POSITION_ZERO_EPS) {
+    return 0.0f;
+  }
+
+  return 360.0f - pos;
+}
+
+String getHomeString() {
+  return "HOME_POS=" + String(savedHomeOffsetAngle, 2) +
+         " HOME_BACK=" + String(getAutoHomeMoveAngle(), 2) +
+         " ENCODER=" + String(getEncoderCount()) +
+         " CURRENT_ANGLE=" + String(getRealAngleTotal(), 2);
+}
+
+void saveHomeOffsetToFlash() {
+  prefs.begin("motorcfg", false);
+  prefs.putUInt("ver", CONFIG_VERSION);
+  prefs.putFloat(FLASH_KEY_HOME_ANGLE, savedHomeOffsetAngle);
+  prefs.end();
+
+  Serial.print("Saved home position to Flash: ");
+  Serial.println(savedHomeOffsetAngle, 2);
+}
+
+void updateSavedHomeOffsetByActualDelta(float actualDelta) {
+  savedHomeOffsetAngle = normalizeAngle(savedHomeOffsetAngle + actualDelta);
+
+  if (savedHomeOffsetAngle <= POSITION_ZERO_EPS ||
+      savedHomeOffsetAngle >= 360.0f - POSITION_ZERO_EPS) {
+    savedHomeOffsetAngle = 0.0f;
+  }
+
+  saveHomeOffsetToFlash();
+}
+
+void clearSavedHomeOffset(bool alsoResetEncoder) {
+  savedHomeOffsetAngle = 0.0f;
+
+  if (alsoResetEncoder) {
+    setEncoderCount(0);
+  }
+
+  saveHomeOffsetToFlash();
 }
 
 // =====================================================
@@ -618,7 +709,61 @@ String handleCommand(String cmd) {
     float angle = getRealAngleTotal();
 
     return "ANGLE CURRENT=" + String(angle, 2) +
-           " ENCODER=" + String(enc);
+           " ENCODER=" + String(enc) +
+           " HOME_POS=" + String(savedHomeOffsetAngle, 2);
+  }
+
+  // =====================================================
+  // Flash 当前位置查询
+  // =====================================================
+  if (cmd == "HOME?" || cmd == "POS?") {
+    return getHomeString();
+  }
+
+  // =====================================================
+  // 把当前位置设为零点：清除 Flash 位置，同时把本次开机的编码器计数清零
+  // 命令：HOME_ZERO / ZERO
+  // =====================================================
+  if (cmd == "HOME_ZERO" || cmd == "ZERO") {
+    clearSavedHomeOffset(true);
+    return "OK HOME_ZERO " + getHomeString();
+  }
+
+  // =====================================================
+  // 手动设置 Flash 里的当前位置角度
+  // 命令：HOME:60 表示当前位置在零点后方正方向 60 度；重启后会继续正方向走 300 度回零
+  // =====================================================
+  if (cmd.startsWith("HOME:") || cmd.startsWith("POS:")) {
+    String data;
+
+    if (cmd.startsWith("HOME:")) {
+      data = cmd.substring(5);
+    } else {
+      data = cmd.substring(4);
+    }
+
+    data.trim();
+
+    if (isValidNumber(data)) {
+      float newHome = data.toFloat();
+
+      if (newHome < -64800.0f || newHome > 64800.0f) {
+        return "ERR HOME RANGE";
+      }
+
+      savedHomeOffsetAngle = normalizeAngle(newHome);
+
+      if (savedHomeOffsetAngle <= POSITION_ZERO_EPS ||
+          savedHomeOffsetAngle >= 360.0f - POSITION_ZERO_EPS) {
+        savedHomeOffsetAngle = 0.0f;
+      }
+
+      saveHomeOffsetToFlash();
+
+      return "OK HOME " + getHomeString();
+    }
+
+    return "ERR HOME FORMAT";
   }
 
   // =====================================================
@@ -639,7 +784,12 @@ String handleCommand(String cmd) {
       return "ERR RANGE";
     }
 
-    xQueueSend(targetQueue, &targetAngle, portMAX_DELAY);
+    MotorMoveCommand moveCmd;
+    moveCmd.angle = targetAngle;
+    moveCmd.zeroAfterMove = false;
+    moveCmd.savePosition = true;
+
+    xQueueSend(targetQueue, &moveCmd, portMAX_DELAY);
 
     return "OK ANGLE " + String(targetAngle, 2);
   }
@@ -706,11 +856,12 @@ void serialTask(void* pvParameters) {
 // Constant Speed Closed Loop Motor Task
 // =====================================================
 void closedLoopTask(void* pvParameters) {
-  float moveAngle;
+  MotorMoveCommand moveCmd;
 
   while (true) {
-    if (xQueueReceive(targetQueue, &moveAngle, portMAX_DELAY)) {
+    if (xQueueReceive(targetQueue, &moveCmd, portMAX_DELAY)) {
 
+      float moveAngle = moveCmd.angle;
       float startAngle = getRealAngleTotal();
       float targetAngle = startAngle + moveAngle;
 
@@ -729,7 +880,11 @@ void closedLoopTask(void* pvParameters) {
       Serial.print(" KI=");
       Serial.print(pidKi);
       Serial.print(" KD=");
-      Serial.println(pidKd);
+      Serial.print(pidKd);
+      Serial.print(" | HomePos=");
+      Serial.print(savedHomeOffsetAngle);
+      Serial.print(" | ZeroAfterMove=");
+      Serial.println(moveCmd.zeroAfterMove ? "YES" : "NO");
 
       long stepCounter = 0;
       long expectedSteps = lround(fabs(moveAngle) / STEP_ANGLE);
@@ -765,8 +920,13 @@ void closedLoopTask(void* pvParameters) {
       float lastError = targetAngle - startAngle;
       unsigned long lastPidUs = micros();
 
+      bool arrived = false;
+      float finalAngle = startAngle;
+
       while (true) {
         float currentAngle = getRealAngleTotal();
+        finalAngle = currentAngle;
+
         float error = targetAngle - currentAngle;
         float absError = fabs(error);
 
@@ -774,6 +934,8 @@ void closedLoopTask(void* pvParameters) {
         // 到位判断
         // =====================================================
         if (absError <= angleTolerance) {
+          arrived = true;
+
           Serial.print("Arrived. Angle: ");
           Serial.print(currentAngle);
           Serial.print(" deg | Error: ");
@@ -910,6 +1072,28 @@ void closedLoopTask(void* pvParameters) {
           vTaskDelay(pdMS_TO_TICKS(1));
         }
       }
+
+      // =====================================================
+      // 一次运动结束后再写 Flash，避免每一步写 Flash 导致寿命下降
+      // =====================================================
+      if (moveCmd.savePosition) {
+        float actualDelta = finalAngle - startAngle;
+
+        if (moveCmd.zeroAfterMove && arrived) {
+          // 自动回零完成：Flash 归零，编码器计数也归零
+          clearSavedHomeOffset(true);
+          Serial.println("Auto home finished, home position cleared to 0");
+        } else {
+          // 普通运动：用编码器测到的实际角度增量累加保存
+          // 如果运动失败，也保存已实际移动的角度，避免 Flash 位置完全不变
+          updateSavedHomeOffsetByActualDelta(actualDelta);
+
+          Serial.print("Home position updated by actual delta: ");
+          Serial.print(actualDelta, 2);
+          Serial.print(" deg | New home position: ");
+          Serial.println(savedHomeOffsetAngle, 2);
+        }
+      }
     }
   }
 }
@@ -932,6 +1116,9 @@ void statusTask(void* pvParameters) {
 
     Serial.print(" | Total: ");
     Serial.print(realAngleTotal);
+
+    Serial.print(" | HomePos: ");
+    Serial.print(savedHomeOffsetAngle);
 
     Serial.print(" | SW: ");
     Serial.println(swState == LOW ? "PRESSED" : "RELEASED");
@@ -972,7 +1159,7 @@ void setup() {
   lastCLK = digitalRead(ENCODE_CLK);
   attachInterrupt(digitalPinToInterrupt(ENCODE_CLK), encoderISR, CHANGE);
 
-  targetQueue = xQueueCreate(10, sizeof(float));
+  targetQueue = xQueueCreate(10, sizeof(MotorMoveCommand));
 
   if (targetQueue == NULL) {
     Serial.println("ERR: queue create failed");
@@ -1022,6 +1209,26 @@ void setup() {
     1
   );
 
+  // 开机自动回零：如果 Flash 里保存了当前位置，就继续正方向走 360 - 当前位置 回零
+  float autoHomeAngle = getAutoHomeMoveAngle();
+
+  if (fabs(autoHomeAngle) > AUTO_HOME_MIN_ANGLE) {
+    MotorMoveCommand homeCmd;
+    homeCmd.angle = autoHomeAngle;
+    homeCmd.zeroAfterMove = true;
+    homeCmd.savePosition = true;
+
+    xQueueSend(targetQueue, &homeCmd, portMAX_DELAY);
+
+    Serial.print("Auto home queued. Saved position: " );
+    Serial.print(savedHomeOffsetAngle, 2);
+    Serial.print(" deg | Move positive: " );
+    Serial.print(homeCmd.angle, 2);
+    Serial.println(" deg");
+  } else {
+    Serial.println("Auto home skipped: saved position is 0");
+  }
+
   xTaskCreatePinnedToCore(
     statusTask,
     "Status Task",
@@ -1035,6 +1242,7 @@ void setup() {
   Serial.println("Input angle via Serial or WiFi, e.g. 90 / -180 / ANGLE:45");
   Serial.println("v3 fast defaults: SPEED=1500 step/s, MIN_SPEED=500 step/s");
   Serial.println("Config commands: CFG? / CFG_SAVE / CFG_RESET / PID? / SPEED? / MINSPEED? / ENCODER? / TOL?");
+  Serial.println("Home commands: HOME? / POS? / HOME_ZERO / ZERO / HOME:60");
 }
 
 // =====================================================
