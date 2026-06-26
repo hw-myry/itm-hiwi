@@ -14,9 +14,9 @@
 // =====================================================
 // 找零 / Flash 位置保存功能开关
 // =====================================================
-// ENABLE_AUTO_HOME_FLASH = 1：开启 HOME_POS 写入 Flash，重启后自动用 360-HOME_POS 找零
+// ENABLE_AUTO_HOME_FLASH = 1：开启 HOME_POS 写入 Flash，重启后自动用 -HOME_POS 直接反向找零
 // ENABLE_AUTO_HOME_FLASH = 0：关闭 HOME_POS 写入 Flash，也不执行开机自动找零
-#define ENABLE_AUTO_HOME_FLASH 0
+#define ENABLE_AUTO_HOME_FLASH 1
 
 // ===== WiFi STA 模式参数 =====
 const char* WIFI_SSID = "Freifunk";
@@ -38,15 +38,16 @@ Preferences prefs;
 const uint32_t CONFIG_VERSION = 3;
 
 // =====================================================
-// Flash 当前位置 / 单方向回零参数
+// Flash 当前位置 / 反向直接回零参数
 // =====================================================
-// savedHomeOffsetAngle 表示“当前位置相对零点的角度”，只保存 0~360 度。
-// 约定：右转为正，左转为负，保存时自动取 360 度余数。
-// 例如：右转90 => 90；重启后自动继续右转 360 - 90 = 270 度回零。
-// 例如：右转120再左转60 => 60；重启后自动右转300度回零。
+// savedHomeOffsetAngle 表示“当前位置相对零点的有符号角度”。
+// 约定：右转为正，左转为负，保存时保留方向，不再用 360 - HOME_POS 回零。
+// 例如：右转 60 => HOME_POS=60；重启后自动左转 -60 回零。
+// 例如：左转 -60 => HOME_POS=-60；重启后自动右转 60 回零。
+// 例如：右转 120 再左转 60 => HOME_POS=60；重启后自动左转 -60 回零。
 const char* FLASH_KEY_HOME_ANGLE = "homeang";
 const float AUTO_HOME_MIN_ANGLE = 0.5f;      // 小于这个角度就认为不用回零
-const float POSITION_ZERO_EPS = 0.5f;        // 接近0或360时保存成0
+const float POSITION_ZERO_EPS = 0.5f;        // 接近0或整圈时保存成0
 
 // =====================================================
 // 反向间隙补偿参数
@@ -113,7 +114,7 @@ float angleTolerance = DEFAULT_ANGLE_TOLERANCE;
 // 反向间隙补偿角度，默认 5 度，可通过 BACKLASH:5 修改，再用 CFG_SAVE 保存
 float backlashCompAngle = DEFAULT_BACKLASH_COMP_ANGLE;
 
-// 保存到 Flash 的当前位置角度：范围 0~360，表示从零点开始正方向转到当前点
+// 保存到 Flash 的当前位置角度：有符号角度，正数表示在零点正方向，负数表示在零点反方向
 float savedHomeOffsetAngle = 0.0f;
 
 // 记录上一次“用户命令方向”
@@ -221,6 +222,20 @@ void IRAM_ATTR encoderISR() {
 float normalizeAngle(float angle) {
   float a = fmod(angle, 360.0f);
   if (a < 0) a += 360.0f;
+  return a;
+}
+
+// HOME_POS 专用归一化：保留正负方向，只去掉整圈。
+// Arduino/C 的 fmod 对负数会保留负号：fmod(-420, 360) = -60。
+// 这样自动回零时可以直接走 -HOME_POS，而不是 360 - HOME_POS。
+float normalizeHomeOffsetAngle(float angle) {
+  float a = fmod(angle, 360.0f);
+
+  if (fabs(a) <= POSITION_ZERO_EPS ||
+      fabs(fabs(a) - 360.0f) <= POSITION_ZERO_EPS) {
+    return 0.0f;
+  }
+
   return a;
 }
 
@@ -397,12 +412,7 @@ void loadConfigFromFlash() {
     savedHomeOffsetAngle = 0.0f;
   }
 
-  savedHomeOffsetAngle = normalizeAngle(savedHomeOffsetAngle);
-
-  if (savedHomeOffsetAngle <= POSITION_ZERO_EPS ||
-      savedHomeOffsetAngle >= 360.0f - POSITION_ZERO_EPS) {
-    savedHomeOffsetAngle = 0.0f;
-  }
+  savedHomeOffsetAngle = normalizeHomeOffsetAngle(savedHomeOffsetAngle);
 #else
   Serial.println("Auto home Flash position tracking disabled by ENABLE_AUTO_HOME_FLASH=0");
 #endif
@@ -480,13 +490,16 @@ void resetConfigToDefault() {
 
 float getAutoHomeMoveAngle() {
 #if ENABLE_AUTO_HOME_FLASH == 1
-  float pos = normalizeAngle(savedHomeOffsetAngle);
+  float pos = normalizeHomeOffsetAngle(savedHomeOffsetAngle);
 
-  if (pos <= POSITION_ZERO_EPS || pos >= 360.0f - POSITION_ZERO_EPS) {
+  if (fabs(pos) <= POSITION_ZERO_EPS) {
     return 0.0f;
   }
 
-  return 360.0f - pos;
+  // 直接往当前位置的反方向回零：
+  // HOME_POS=60  -> HOME_BACK=-60
+  // HOME_POS=-60 -> HOME_BACK=60
+  return -pos;
 #else
   return 0.0f;
 #endif
@@ -505,6 +518,8 @@ String getHomeString() {
 
 void saveHomeOffsetToFlash() {
 #if ENABLE_AUTO_HOME_FLASH == 1
+  savedHomeOffsetAngle = normalizeHomeOffsetAngle(savedHomeOffsetAngle);
+
   prefs.begin("motorcfg", false);
   prefs.putUInt("ver", CONFIG_VERSION);
   prefs.putFloat(FLASH_KEY_HOME_ANGLE, savedHomeOffsetAngle);
@@ -520,13 +535,7 @@ void saveHomeOffsetToFlash() {
 
 void updateSavedHomeOffsetByActualDelta(float actualDelta) {
 #if ENABLE_AUTO_HOME_FLASH == 1
-  savedHomeOffsetAngle = normalizeAngle(savedHomeOffsetAngle + actualDelta);
-
-  if (savedHomeOffsetAngle <= POSITION_ZERO_EPS ||
-      savedHomeOffsetAngle >= 360.0f - POSITION_ZERO_EPS) {
-    savedHomeOffsetAngle = 0.0f;
-  }
-
+  savedHomeOffsetAngle = normalizeHomeOffsetAngle(savedHomeOffsetAngle + actualDelta);
   saveHomeOffsetToFlash();
 #else
   savedHomeOffsetAngle = 0.0f;
@@ -953,7 +962,8 @@ String handleCommand(String cmd) {
 
   // =====================================================
   // 手动设置 Flash 里的当前位置角度
-  // 命令：HOME:60 表示当前位置在零点后方正方向 60 度；重启后会继续正方向走 300 度回零
+  // 命令：HOME:60 表示当前位置在零点后方正方向 60 度；重启后会反向走 -60 度回零
+  // 命令：HOME:-60 表示当前位置在零点后方反方向 60 度；重启后会反向走 60 度回零
   // =====================================================
   if (cmd.startsWith("HOME:") || cmd.startsWith("POS:")) {
     String data;
@@ -974,13 +984,7 @@ String handleCommand(String cmd) {
       }
 
 #if ENABLE_AUTO_HOME_FLASH == 1
-      savedHomeOffsetAngle = normalizeAngle(newHome);
-
-      if (savedHomeOffsetAngle <= POSITION_ZERO_EPS ||
-          savedHomeOffsetAngle >= 360.0f - POSITION_ZERO_EPS) {
-        savedHomeOffsetAngle = 0.0f;
-      }
-
+      savedHomeOffsetAngle = normalizeHomeOffsetAngle(newHome);
       saveHomeOffsetToFlash();
 
       return "OK HOME " + getHomeString();
@@ -1593,7 +1597,7 @@ void setup() {
   );
 
 #if ENABLE_AUTO_HOME_FLASH == 1
-  // 开机自动回零：如果 Flash 里保存了当前位置，就继续正方向走 360 - 当前位置 回零
+  // 开机自动回零：如果 Flash 里保存了当前位置，就直接往 HOME_POS 的反方向回零
   float autoHomeAngle = getAutoHomeMoveAngle();
 
   if (fabs(autoHomeAngle) > AUTO_HOME_MIN_ANGLE) {
@@ -1606,7 +1610,7 @@ void setup() {
 
     Serial.print("Auto home queued. Saved position: " );
     Serial.print(savedHomeOffsetAngle, 2);
-    Serial.print(" deg | Move positive: " );
+    Serial.print(" deg | Move back: " );
     Serial.print(homeCmd.angle, 2);
     Serial.println(" deg");
   } else {
