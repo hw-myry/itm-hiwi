@@ -11,6 +11,13 @@
 // NETMODE = 1：ESP32 自己开热点 AP
 #define NETMODE 1
 
+// =====================================================
+// 找零 / Flash 位置保存功能开关
+// =====================================================
+// ENABLE_AUTO_HOME_FLASH = 1：开启 HOME_POS 写入 Flash，重启后自动用 360-HOME_POS 找零
+// ENABLE_AUTO_HOME_FLASH = 0：关闭 HOME_POS 写入 Flash，也不执行开机自动找零
+#define ENABLE_AUTO_HOME_FLASH 0
+
 // ===== WiFi STA 模式参数 =====
 const char* WIFI_SSID = "Freifunk";
 const char* WIFI_PASS = "";
@@ -40,6 +47,16 @@ const uint32_t CONFIG_VERSION = 3;
 const char* FLASH_KEY_HOME_ANGLE = "homeang";
 const float AUTO_HOME_MIN_ANGLE = 0.5f;      // 小于这个角度就认为不用回零
 const float POSITION_ZERO_EPS = 0.5f;        // 接近0或360时保存成0
+
+// =====================================================
+// 反向间隙补偿参数
+// =====================================================
+// 如果本次运动方向和上一次运动方向相反，就在本次实际执行角度上多走这个角度。
+// 例如：上一次 +90，本次命令 -90，实际执行 -95，用多出的 5 度补机械间隙。
+// 注意：Flash 里的 HOME_POS 仍按用户命令角度更新，不把补偿的 5 度算进去。
+const char* FLASH_KEY_BACKLASH = "backlash";
+const float DEFAULT_BACKLASH_COMP_ANGLE = 5.0f;
+const float DIRECTION_DEADBAND_ANGLE = 0.01f;
 
 // =====================================================
 // LED
@@ -93,8 +110,17 @@ float encoderDegPerCount = 360.0f / DEFAULT_ENCODER_COUNTS_PER_REV;
 
 float angleTolerance = DEFAULT_ANGLE_TOLERANCE;
 
+// 反向间隙补偿角度，默认 5 度，可通过 BACKLASH:5 修改，再用 CFG_SAVE 保存
+float backlashCompAngle = DEFAULT_BACKLASH_COMP_ANGLE;
+
 // 保存到 Flash 的当前位置角度：范围 0~360，表示从零点开始正方向转到当前点
 float savedHomeOffsetAngle = 0.0f;
+
+// 记录上一次“用户命令方向”
+//  1 = 正转 / 右转
+// -1 = 反转 / 左转
+//  0 = 还没有有效运动，第一次运动不做间隙补偿
+int lastMoveDir = 0;
 
 // =====================================================
 // 固定控制参数
@@ -195,6 +221,30 @@ float getRealAngleTotal() {
   return countCopy * encoderDegPerCount;
 }
 
+int getMoveDirection(float angle) {
+  if (angle > DIRECTION_DEADBAND_ANGLE) {
+    return 1;
+  }
+
+  if (angle < -DIRECTION_DEADBAND_ANGLE) {
+    return -1;
+  }
+
+  return 0;
+}
+
+String getDirectionName(int dir) {
+  if (dir > 0) {
+    return "POS";
+  }
+
+  if (dir < 0) {
+    return "NEG";
+  }
+
+  return "NONE";
+}
+
 // =====================================================
 // Flash Config Functions
 // =====================================================
@@ -215,7 +265,10 @@ String getConfigString() {
          " CPR=" + String(encoderCountsPerRev, 4) +
          " DEG_PER_COUNT=" + String(encoderDegPerCount, 4) +
          " TOL=" + String(angleTolerance, 2) +
-         " HOME_POS=" + String(savedHomeOffsetAngle, 2);
+         " AUTO_HOME_FLASH=" + String(ENABLE_AUTO_HOME_FLASH == 1 ? "ON" : "OFF") +
+         " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
+         " BACKLASH=" + String(backlashCompAngle, 2) +
+         " LAST_DIR=" + getDirectionName(lastMoveDir);
 }
 
 void loadConfigFromFlash() {
@@ -231,11 +284,17 @@ void loadConfigFromFlash() {
   minSpeedHz = prefs.getFloat("minspd", DEFAULT_MIN_SPEED_HZ);
   encoderCountsPerRev = prefs.getFloat("cpr", DEFAULT_ENCODER_COUNTS_PER_REV);
   angleTolerance = prefs.getFloat("tol", DEFAULT_ANGLE_TOLERANCE);
+  backlashCompAngle = prefs.getFloat(FLASH_KEY_BACKLASH, DEFAULT_BACKLASH_COMP_ANGLE);
 
+#if ENABLE_AUTO_HOME_FLASH == 1
   savedHomeOffsetAngle = prefs.getFloat(FLASH_KEY_HOME_ANGLE, 0.0f);
+#else
+  savedHomeOffsetAngle = 0.0f;
+#endif
 
   prefs.end();
 
+#if ENABLE_AUTO_HOME_FLASH == 1
   if (savedHomeOffsetAngle < -64800.0f || savedHomeOffsetAngle > 64800.0f) {
     Serial.println("Saved home position out of range, reset to 0");
     savedHomeOffsetAngle = 0.0f;
@@ -246,6 +305,13 @@ void loadConfigFromFlash() {
   if (savedHomeOffsetAngle <= POSITION_ZERO_EPS ||
       savedHomeOffsetAngle >= 360.0f - POSITION_ZERO_EPS) {
     savedHomeOffsetAngle = 0.0f;
+  }
+#else
+  Serial.println("Auto home Flash position tracking disabled by ENABLE_AUTO_HOME_FLASH=0");
+#endif
+
+  if (backlashCompAngle < 0.0f || backlashCompAngle > 45.0f) {
+    backlashCompAngle = DEFAULT_BACKLASH_COMP_ANGLE;
   }
 
   // 如果是旧版本保存的配置，自动把速度相关参数升级到 v3 的快速默认值。
@@ -281,7 +347,10 @@ void saveConfigToFlash() {
   prefs.putFloat("minspd", minSpeedHz);
   prefs.putFloat("cpr", encoderCountsPerRev);
   prefs.putFloat("tol", angleTolerance);
+  prefs.putFloat(FLASH_KEY_BACKLASH, backlashCompAngle);
+#if ENABLE_AUTO_HOME_FLASH == 1
   prefs.putFloat(FLASH_KEY_HOME_ANGLE, savedHomeOffsetAngle);
+#endif
 
   prefs.end();
 
@@ -298,7 +367,9 @@ void resetConfigToDefault() {
   minSpeedHz = DEFAULT_MIN_SPEED_HZ;
   encoderCountsPerRev = DEFAULT_ENCODER_COUNTS_PER_REV;
   angleTolerance = DEFAULT_ANGLE_TOLERANCE;
+  backlashCompAngle = DEFAULT_BACKLASH_COMP_ANGLE;
   savedHomeOffsetAngle = 0.0f;
+  lastMoveDir = 0;
 
   updateDerivedParams();
 
@@ -310,6 +381,7 @@ void resetConfigToDefault() {
 }
 
 float getAutoHomeMoveAngle() {
+#if ENABLE_AUTO_HOME_FLASH == 1
   float pos = normalizeAngle(savedHomeOffsetAngle);
 
   if (pos <= POSITION_ZERO_EPS || pos >= 360.0f - POSITION_ZERO_EPS) {
@@ -317,16 +389,23 @@ float getAutoHomeMoveAngle() {
   }
 
   return 360.0f - pos;
+#else
+  return 0.0f;
+#endif
 }
 
 String getHomeString() {
-  return "HOME_POS=" + String(savedHomeOffsetAngle, 2) +
+  return "AUTO_HOME_FLASH=" + String(ENABLE_AUTO_HOME_FLASH == 1 ? "ON" : "OFF") +
+         " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
          " HOME_BACK=" + String(getAutoHomeMoveAngle(), 2) +
+         " BACKLASH=" + String(backlashCompAngle, 2) +
+         " LAST_DIR=" + getDirectionName(lastMoveDir) +
          " ENCODER=" + String(getEncoderCount()) +
          " CURRENT_ANGLE=" + String(getRealAngleTotal(), 2);
 }
 
 void saveHomeOffsetToFlash() {
+#if ENABLE_AUTO_HOME_FLASH == 1
   prefs.begin("motorcfg", false);
   prefs.putUInt("ver", CONFIG_VERSION);
   prefs.putFloat(FLASH_KEY_HOME_ANGLE, savedHomeOffsetAngle);
@@ -334,9 +413,14 @@ void saveHomeOffsetToFlash() {
 
   Serial.print("Saved home position to Flash: ");
   Serial.println(savedHomeOffsetAngle, 2);
+#else
+  savedHomeOffsetAngle = 0.0f;
+  Serial.println("Auto home Flash disabled, home position not written to Flash");
+#endif
 }
 
 void updateSavedHomeOffsetByActualDelta(float actualDelta) {
+#if ENABLE_AUTO_HOME_FLASH == 1
   savedHomeOffsetAngle = normalizeAngle(savedHomeOffsetAngle + actualDelta);
 
   if (savedHomeOffsetAngle <= POSITION_ZERO_EPS ||
@@ -345,6 +429,9 @@ void updateSavedHomeOffsetByActualDelta(float actualDelta) {
   }
 
   saveHomeOffsetToFlash();
+#else
+  savedHomeOffsetAngle = 0.0f;
+#endif
 }
 
 void clearSavedHomeOffset(bool alsoResetEncoder) {
@@ -352,6 +439,7 @@ void clearSavedHomeOffset(bool alsoResetEncoder) {
 
   if (alsoResetEncoder) {
     setEncoderCount(0);
+    lastMoveDir = 0;
   }
 
   saveHomeOffsetToFlash();
@@ -702,6 +790,39 @@ String handleCommand(String cmd) {
   }
 
   // =====================================================
+  // 反向间隙补偿查询
+  // =====================================================
+  if (cmd == "BACKLASH?") {
+    return "BACKLASH=" + String(backlashCompAngle, 2) +
+           " LAST_DIR=" + getDirectionName(lastMoveDir);
+  }
+
+  // =====================================================
+  // 反向间隙补偿设置
+  // 命令：BACKLASH:10
+  // 只改 RAM，不立刻写 Flash；需要长期保存就再发 CFG_SAVE
+  // =====================================================
+  if (cmd.startsWith("BACKLASH:")) {
+    String data = cmd.substring(9);
+    data.trim();
+
+    if (isValidNumber(data)) {
+      float newBacklash = data.toFloat();
+
+      if (newBacklash < 0.0f || newBacklash > 45.0f) {
+        return "ERR BACKLASH RANGE";
+      }
+
+      backlashCompAngle = newBacklash;
+
+      return "OK BACKLASH=" + String(backlashCompAngle, 2) +
+             " LAST_DIR=" + getDirectionName(lastMoveDir);
+    }
+
+    return "ERR BACKLASH FORMAT";
+  }
+
+  // =====================================================
   // 当前角度查询
   // =====================================================
   if (cmd == "ANGLE?") {
@@ -710,7 +831,8 @@ String handleCommand(String cmd) {
 
     return "ANGLE CURRENT=" + String(angle, 2) +
            " ENCODER=" + String(enc) +
-           " HOME_POS=" + String(savedHomeOffsetAngle, 2);
+           " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
+           " LAST_DIR=" + getDirectionName(lastMoveDir);
   }
 
   // =====================================================
@@ -751,6 +873,7 @@ String handleCommand(String cmd) {
         return "ERR HOME RANGE";
       }
 
+#if ENABLE_AUTO_HOME_FLASH == 1
       savedHomeOffsetAngle = normalizeAngle(newHome);
 
       if (savedHomeOffsetAngle <= POSITION_ZERO_EPS ||
@@ -761,6 +884,10 @@ String handleCommand(String cmd) {
       saveHomeOffsetToFlash();
 
       return "OK HOME " + getHomeString();
+#else
+      savedHomeOffsetAngle = 0.0f;
+      return "ERR HOME DISABLED ENABLE_AUTO_HOME_FLASH=0";
+#endif
     }
 
     return "ERR HOME FORMAT";
@@ -787,7 +914,11 @@ String handleCommand(String cmd) {
     MotorMoveCommand moveCmd;
     moveCmd.angle = targetAngle;
     moveCmd.zeroAfterMove = false;
+#if ENABLE_AUTO_HOME_FLASH == 1
     moveCmd.savePosition = true;
+#else
+    moveCmd.savePosition = false;
+#endif
 
     xQueueSend(targetQueue, &moveCmd, portMAX_DELAY);
 
@@ -861,13 +992,35 @@ void closedLoopTask(void* pvParameters) {
   while (true) {
     if (xQueueReceive(targetQueue, &moveCmd, portMAX_DELAY)) {
 
-      float moveAngle = moveCmd.angle;
+      // requestedAngle 是用户/自动回零请求的逻辑角度。
+      // moveAngle 是实际送给 PID 执行的角度，可能已经加了反向间隙补偿。
+      float requestedAngle = moveCmd.angle;
+      int currentMoveDir = getMoveDirection(requestedAngle);
+
+      float backlashComp = 0.0f;
+      bool backlashApplied = false;
+
+      if (!moveCmd.zeroAfterMove && currentMoveDir != 0 &&
+          lastMoveDir != 0 && currentMoveDir != lastMoveDir) {
+        backlashComp = backlashCompAngle * currentMoveDir;
+        backlashApplied = true;
+      }
+
+      float moveAngle = requestedAngle + backlashComp;
       float startAngle = getRealAngleTotal();
       float targetAngle = startAngle + moveAngle;
 
       Serial.print("PID Move: ");
       Serial.print(moveAngle);
-      Serial.print(" deg | Start: ");
+      Serial.print(" deg | Requested: ");
+      Serial.print(requestedAngle);
+      Serial.print(" deg | BacklashComp: ");
+      Serial.print(backlashComp);
+      Serial.print(" deg | LastDir: ");
+      Serial.print(getDirectionName(lastMoveDir));
+      Serial.print(" | NewDir: ");
+      Serial.print(getDirectionName(currentMoveDir));
+      Serial.print(" | Start: ");
       Serial.print(startAngle);
       Serial.print(" deg | Target: ");
       Serial.print(targetAngle);
@@ -1076,22 +1229,50 @@ void closedLoopTask(void* pvParameters) {
       // =====================================================
       // 一次运动结束后再写 Flash，避免每一步写 Flash 导致寿命下降
       // =====================================================
+      float actualDelta = finalAngle - startAngle;
+
       if (moveCmd.savePosition) {
-        float actualDelta = finalAngle - startAngle;
 
         if (moveCmd.zeroAfterMove && arrived) {
           // 自动回零完成：Flash 归零，编码器计数也归零
           clearSavedHomeOffset(true);
+          lastMoveDir = getMoveDirection(moveAngle);
           Serial.println("Auto home finished, home position cleared to 0");
         } else {
-          // 普通运动：用编码器测到的实际角度增量累加保存
-          // 如果运动失败，也保存已实际移动的角度，避免 Flash 位置完全不变
-          updateSavedHomeOffsetByActualDelta(actualDelta);
+          // 普通运动：Flash 的 HOME_POS 按“用户命令角度”更新。
+          // 反向补偿多走的角度只用于吃掉机械间隙，不计入零点位置。
+          float logicalDelta;
 
-          Serial.print("Home position updated by actual delta: ");
+          if (arrived) {
+            logicalDelta = requestedAngle;
+          } else {
+            // 运动失败时，用实际编码器增量减去已加的补偿，尽量避免位置完全不变。
+            logicalDelta = actualDelta - backlashComp;
+          }
+
+          updateSavedHomeOffsetByActualDelta(logicalDelta);
+
+          if (currentMoveDir != 0 && arrived) {
+            lastMoveDir = currentMoveDir;
+          }
+
+          Serial.print("Home position updated by logical delta: ");
+          Serial.print(logicalDelta, 2);
+          Serial.print(" deg | Actual motor delta: ");
           Serial.print(actualDelta, 2);
-          Serial.print(" deg | New home position: ");
-          Serial.println(savedHomeOffsetAngle, 2);
+          Serial.print(" deg | Backlash applied: ");
+          Serial.print(backlashApplied ? "YES" : "NO");
+          Serial.print(" | New home position: ");
+          Serial.print(savedHomeOffsetAngle, 2);
+          Serial.print(" | LastDir: ");
+          Serial.println(getDirectionName(lastMoveDir));
+        }
+      } else {
+        // 关闭 Flash 找零时，也要继续记录上一次方向，保证反向间隙补偿仍然生效。
+        if (!moveCmd.zeroAfterMove && currentMoveDir != 0 && arrived) {
+          lastMoveDir = currentMoveDir;
+          Serial.print("Position save disabled, LastDir updated: ");
+          Serial.println(getDirectionName(lastMoveDir));
         }
       }
     }
@@ -1119,6 +1300,9 @@ void statusTask(void* pvParameters) {
 
     Serial.print(" | HomePos: ");
     Serial.print(savedHomeOffsetAngle);
+
+    Serial.print(" | LastDir: ");
+    Serial.print(getDirectionName(lastMoveDir));
 
     Serial.print(" | SW: ");
     Serial.println(swState == LOW ? "PRESSED" : "RELEASED");
@@ -1209,6 +1393,7 @@ void setup() {
     1
   );
 
+#if ENABLE_AUTO_HOME_FLASH == 1
   // 开机自动回零：如果 Flash 里保存了当前位置，就继续正方向走 360 - 当前位置 回零
   float autoHomeAngle = getAutoHomeMoveAngle();
 
@@ -1228,6 +1413,9 @@ void setup() {
   } else {
     Serial.println("Auto home skipped: saved position is 0");
   }
+#else
+  Serial.println("Auto home disabled: ENABLE_AUTO_HOME_FLASH=0");
+#endif
 
   xTaskCreatePinnedToCore(
     statusTask,
@@ -1241,8 +1429,10 @@ void setup() {
 
   Serial.println("Input angle via Serial or WiFi, e.g. 90 / -180 / ANGLE:45");
   Serial.println("v3 fast defaults: SPEED=1500 step/s, MIN_SPEED=500 step/s");
-  Serial.println("Config commands: CFG? / CFG_SAVE / CFG_RESET / PID? / SPEED? / MINSPEED? / ENCODER? / TOL?");
+  Serial.println("Config commands: CFG? / CFG_SAVE / CFG_RESET / PID? / SPEED? / MINSPEED? / ENCODER? / TOL? / BACKLASH?");
   Serial.println("Home commands: HOME? / POS? / HOME_ZERO / ZERO / HOME:60");
+  Serial.println("Set ENABLE_AUTO_HOME_FLASH to 1 to enable Flash home, 0 to disable it");
+  Serial.println("Backlash commands: BACKLASH? / BACKLASH:5, use CFG_SAVE to persist");
 }
 
 // =====================================================
