@@ -6,6 +6,262 @@
 #include <QTimer>
 #include <QRegularExpression>
 #include <QDoubleValidator>
+#include <QComboBox>
+#include <QLabel>
+#include <QLayout>
+#include <QBoxLayout>
+#include <QGridLayout>
+
+// =====================================================
+// Motor send-angle state
+// 上位机发出 ANGLE 后，必须等 ESP32 返回 MOTOR_DONE 才能再次发送角度
+// 角度发送模式下拉框：
+//   0 = 单次发送角度
+//   1 = 来回旋转：+A, -A, +A, -A ... 无限循环
+//
+// 来回旋转模式下：
+//   - 按钮保持可点击，显示“停止来回旋转”
+//   - 点击停止后，不会立刻打断当前电机动作
+//   - 等当前动作收到 MOTOR_DONE 后，不再发送下一条 ANGLE
+// =====================================================
+namespace {
+enum AngleSendMode {
+    MODE_SINGLE = 0,
+    MODE_BACK_AND_FORTH = 1
+};
+
+bool gMotorMoving = false;
+bool gAngleSequenceRunning = false;
+bool gAngleSequenceStopRequested = false;
+double gBackAndForthBaseAngle = 0.0;
+int gBackAndForthSentCount = 0;   // 已经发送了多少段来回旋转命令
+
+QComboBox *gAngleModeCombo = nullptr;
+QLabel *gAngleModeLabel = nullptr;
+
+const char *SEND_ANGLE_SINGLE_IDLE_STYLE =
+    "QPushButton {"
+    " background-color: #2ecc71;"
+    " color: white;"
+    " font-weight: bold;"
+    " border-radius: 6px;"
+    " padding: 6px 12px;"
+    "}"
+    "QPushButton:hover {"
+    " background-color: #27ae60;"
+    "}";
+
+const char *SEND_ANGLE_SWING_IDLE_STYLE =
+    "QPushButton {"
+    " background-color: #3498db;"
+    " color: white;"
+    " font-weight: bold;"
+    " border-radius: 6px;"
+    " padding: 6px 12px;"
+    "}"
+    "QPushButton:hover {"
+    " background-color: #2980b9;"
+    "}";
+
+const char *SEND_ANGLE_BUSY_STYLE =
+    "QPushButton {"
+    " background-color: #f39c12;"
+    " color: white;"
+    " font-weight: bold;"
+    " border-radius: 6px;"
+    " padding: 6px 12px;"
+    "}"
+    "QPushButton:disabled {"
+    " background-color: #f39c12;"
+    " color: white;"
+    " font-weight: bold;"
+    "}";
+
+const char *SEND_ANGLE_SWING_BUSY_STYLE =
+    "QPushButton {"
+    " background-color: #e74c3c;"
+    " color: white;"
+    " font-weight: bold;"
+    " border-radius: 6px;"
+    " padding: 6px 12px;"
+    "}"
+    "QPushButton:hover {"
+    " background-color: #c0392b;"
+    "}";
+
+const char *SEND_ANGLE_SWING_STOPPING_STYLE =
+    "QPushButton {"
+    " background-color: #7f8c8d;"
+    " color: white;"
+    " font-weight: bold;"
+    " border-radius: 6px;"
+    " padding: 6px 12px;"
+    "}"
+    "QPushButton:disabled {"
+    " background-color: #7f8c8d;"
+    " color: white;"
+    " font-weight: bold;"
+    "}";
+
+int currentAngleSendMode()
+{
+    if (gAngleModeCombo == nullptr) {
+        return MODE_SINGLE;
+    }
+
+    return gAngleModeCombo->currentIndex();
+}
+
+QString formatAngleForCommand(double angle)
+{
+    // ESP32 可以接收普通数字，这里保留 3 位小数，去掉多余的 0，日志更清晰。
+    QString text = QString::number(angle, 'f', 3);
+
+    while (text.contains('.') && text.endsWith('0')) {
+        text.chop(1);
+    }
+
+    if (text.endsWith('.')) {
+        text.chop(1);
+    }
+
+    if (text == "-0") {
+        text = "0";
+    }
+
+    return text;
+}
+
+double nextBackAndForthAngle()
+{
+    // 第 1 次 +A，第 2 次 -A，第 3 次 +A ... 无限交替。
+    if ((gBackAndForthSentCount % 2) == 0) {
+        return gBackAndForthBaseAngle;
+    }
+
+    return -gBackAndForthBaseAngle;
+}
+
+void setAngleModeWidgetsEnabled(bool enabled)
+{
+    if (gAngleModeCombo != nullptr) {
+        gAngleModeCombo->setEnabled(enabled);
+    }
+
+    if (gAngleModeLabel != nullptr) {
+        gAngleModeLabel->setEnabled(enabled);
+    }
+}
+
+void setSendAngleIdle(Ui::MainWindow *ui)
+{
+    ui->sendAngleButton->setEnabled(true);
+    ui->angleEdit->setEnabled(true);
+    setAngleModeWidgetsEnabled(true);
+
+    if (currentAngleSendMode() == MODE_BACK_AND_FORTH) {
+        ui->sendAngleButton->setText("开始来回旋转");
+        ui->sendAngleButton->setStyleSheet(SEND_ANGLE_SWING_IDLE_STYLE);
+    } else {
+        ui->sendAngleButton->setText("发送角度");
+        ui->sendAngleButton->setStyleSheet(SEND_ANGLE_SINGLE_IDLE_STYLE);
+    }
+}
+
+void setSendAngleBusy(Ui::MainWindow *ui)
+{
+    ui->angleEdit->setEnabled(false);
+    setAngleModeWidgetsEnabled(false);
+
+    if (gAngleSequenceRunning) {
+        if (gAngleSequenceStopRequested) {
+            ui->sendAngleButton->setEnabled(false);
+            ui->sendAngleButton->setText("停止中，等待本次完成...");
+            ui->sendAngleButton->setStyleSheet(SEND_ANGLE_SWING_STOPPING_STYLE);
+        } else {
+            // 来回旋转时按钮保持可点击，用来请求停止；不会立即打断当前动作。
+            ui->sendAngleButton->setEnabled(true);
+            ui->sendAngleButton->setText(
+                QString("停止来回旋转（第%1次）").arg(gBackAndForthSentCount)
+                );
+            ui->sendAngleButton->setStyleSheet(SEND_ANGLE_SWING_BUSY_STYLE);
+        }
+    } else {
+        ui->sendAngleButton->setEnabled(false);
+        ui->sendAngleButton->setText("电机转动中...");
+        ui->sendAngleButton->setStyleSheet(SEND_ANGLE_BUSY_STYLE);
+    }
+}
+
+void setupAngleModeCombo(Ui::MainWindow *ui)
+{
+    QWidget *parent = ui->sendAngleButton->parentWidget();
+
+    if (parent == nullptr) {
+        return;
+    }
+
+    // 如果以后你在 Qt Designer 里自己放了 objectName=angleModeCombo 的下拉框，
+    // 这里会直接复用，不会重复创建。
+    gAngleModeCombo = parent->findChild<QComboBox *>("angleModeCombo");
+    gAngleModeLabel = parent->findChild<QLabel *>("angleModeLabel");
+
+    if (gAngleModeCombo == nullptr) {
+        gAngleModeLabel = new QLabel("角度模式:", parent);
+        gAngleModeLabel->setObjectName("angleModeLabel");
+
+        gAngleModeCombo = new QComboBox(parent);
+        gAngleModeCombo->setObjectName("angleModeCombo");
+        gAngleModeCombo->addItem("单次发送角度");
+        gAngleModeCombo->addItem("来回旋转：+A -A 无限循环");
+
+        QLayout *layout = parent->layout();
+
+        if (QBoxLayout *boxLayout = qobject_cast<QBoxLayout *>(layout)) {
+            int buttonIndex = boxLayout->indexOf(ui->sendAngleButton);
+            if (buttonIndex < 0) {
+                buttonIndex = boxLayout->count();
+            }
+
+            boxLayout->insertWidget(buttonIndex, gAngleModeLabel);
+            boxLayout->insertWidget(buttonIndex + 1, gAngleModeCombo);
+        } else if (QGridLayout *gridLayout = qobject_cast<QGridLayout *>(layout)) {
+            int row = 0;
+            int column = 0;
+            int rowSpan = 1;
+            int columnSpan = 1;
+
+            int buttonIndex = gridLayout->indexOf(ui->sendAngleButton);
+            if (buttonIndex >= 0) {
+                gridLayout->getItemPosition(buttonIndex, &row, &column, &rowSpan, &columnSpan);
+                gridLayout->addWidget(gAngleModeLabel, row + 1, column, 1, 1);
+                gridLayout->addWidget(gAngleModeCombo, row + 1, column + 1, 1, columnSpan);
+            } else {
+                gridLayout->addWidget(gAngleModeLabel, gridLayout->rowCount(), 0, 1, 1);
+                gridLayout->addWidget(gAngleModeCombo, gridLayout->rowCount() - 1, 1, 1, 2);
+            }
+        } else {
+            // 没有布局时兜底显示在按钮下方。
+            const QRect buttonRect = ui->sendAngleButton->geometry();
+            gAngleModeLabel->setGeometry(buttonRect.left(), buttonRect.bottom() + 8, 70, 24);
+            gAngleModeCombo->setGeometry(buttonRect.left() + 75, buttonRect.bottom() + 8, 200, 24);
+            gAngleModeLabel->show();
+            gAngleModeCombo->show();
+        }
+    }
+
+    QObject::connect(
+        gAngleModeCombo,
+        QOverload<int>::of(&QComboBox::currentIndexChanged),
+        ui->sendAngleButton,
+        [=](int) {
+            if (!gMotorMoving && !gAngleSequenceRunning) {
+                setSendAngleIdle(ui);
+            }
+        }
+        );
+}
+}
 
 // =====================================================
 // Constructor
@@ -41,6 +297,15 @@ MainWindow::MainWindow(QWidget *parent)
     ui->toleranceEdit->setText("4.5");
 
     ui->currentAngleEdit->setReadOnly(true);
+
+    // 角度发送模式下拉框 + 按钮初始状态
+    setupAngleModeCombo(ui);
+    gMotorMoving = false;
+    gAngleSequenceRunning = false;
+    gAngleSequenceStopRequested = false;
+    gBackAndForthBaseAngle = 0.0;
+    gBackAndForthSentCount = 0;
+    setSendAngleIdle(ui);
 
     // =====================================================
     // 输入限制
@@ -109,6 +374,14 @@ MainWindow::MainWindow(QWidget *parent)
         ui->btnConnect->setText("Connect");
 
         addLog("Disconnected");
+
+        // 断开连接时解除电机忙状态，避免按钮一直锁住
+        gMotorMoving = false;
+        gAngleSequenceRunning = false;
+        gAngleSequenceStopRequested = false;
+        gBackAndForthBaseAngle = 0.0;
+        gBackAndForthSentCount = 0;
+        setSendAngleIdle(ui);
 
         angleTimer->stop();
     });
@@ -228,6 +501,92 @@ void MainWindow::updateConfigEditsFromLine(const QString &line)
 
 void MainWindow::handleEsp32Line(const QString &line)
 {
+    // ESP32 在电机真正停止后会主动发送：MOTOR_DONE STATUS=OK ...
+    // 单次模式：收到 MOTOR_DONE 后解锁按钮。
+    // 来回旋转模式：收到 MOTOR_DONE 后，如果没有请求停止，就继续发送下一段；
+    // 如果已经按过“停止来回旋转”，则在本次 MOTOR_DONE 后结束，不再发送下一条。
+    if (line.startsWith("MOTOR_DONE")) {
+        QString finalAngle = valueFromLine(line, "FINAL");
+        if (!finalAngle.isEmpty()) {
+            ui->currentAngleEdit->setText(finalAngle);
+        }
+
+        gMotorMoving = false;
+
+        if (gAngleSequenceRunning) {
+            if (gAngleSequenceStopRequested) {
+                gAngleSequenceRunning = false;
+                gAngleSequenceStopRequested = false;
+                gBackAndForthBaseAngle = 0.0;
+                gBackAndForthSentCount = 0;
+                setSendAngleIdle(ui);
+                addLog("Back-and-forth stopped after current MOTOR_DONE");
+                return;
+            }
+
+            const double nextAngle = nextBackAndForthAngle();
+            gBackAndForthSentCount++;
+
+            gMotorMoving = true;
+            setSendAngleBusy(ui);
+
+            addLog(
+                QString("Back-and-forth next angle #%1: %2")
+                    .arg(gBackAndForthSentCount)
+                    .arg(formatAngleForCommand(nextAngle))
+                );
+
+            // 稍微延迟 100ms 再发下一段，让 ESP32 的 MOTOR_DONE 和上位机日志先处理完。
+            QTimer::singleShot(100, this, [=]() {
+                if (!gAngleSequenceRunning) {
+                    return;
+                }
+
+                if (gAngleSequenceStopRequested) {
+                    gMotorMoving = false;
+                    gAngleSequenceRunning = false;
+                    gAngleSequenceStopRequested = false;
+                    gBackAndForthBaseAngle = 0.0;
+                    gBackAndForthSentCount = 0;
+                    setSendAngleIdle(ui);
+                    addLog("Back-and-forth stopped before sending next angle");
+                    return;
+                }
+
+                if (socket->state() != QAbstractSocket::ConnectedState) {
+                    addLog("Not connected, back-and-forth stopped");
+                    gMotorMoving = false;
+                    gAngleSequenceRunning = false;
+                    gAngleSequenceStopRequested = false;
+                    gBackAndForthBaseAngle = 0.0;
+                    gBackAndForthSentCount = 0;
+                    setSendAngleIdle(ui);
+                    return;
+                }
+
+                sendCommand(QString("ANGLE:%1").arg(formatAngleForCommand(nextAngle)));
+            });
+
+            return;
+        }
+
+        setSendAngleIdle(ui);
+        addLog("Motor finished, send angle unlocked");
+        return;
+    }
+
+    // 如果 ANGLE 命令被 ESP32 拒绝，不会再有 MOTOR_DONE，这里解除锁定。
+    if (gMotorMoving &&
+        (line.startsWith("ERR") || line.startsWith("UNKNOWN CMD"))) {
+        gMotorMoving = false;
+        gAngleSequenceRunning = false;
+        gAngleSequenceStopRequested = false;
+        gBackAndForthBaseAngle = 0.0;
+        gBackAndForthSentCount = 0;
+        setSendAngleIdle(ui);
+        addLog("Motor command failed, send angle unlocked");
+        return;
+    }
     // CFG KP=... KI=... KD=... SPEED=... CPR=... TOL=...
     if (line.startsWith("CFG ") ||
         line.startsWith("OK CFG_SAVE") ||
@@ -345,13 +704,72 @@ void MainWindow::sendRGB()
 // =====================================================
 void MainWindow::on_sendAngleButton_clicked()
 {
-    QString angle = ui->angleEdit->text().trimmed();
-
-    if (angle.isEmpty()) {
+    // 来回旋转正在运行时，按钮用于“请求停止”。
+    // 不会立刻打断当前电机动作，而是等 ESP32 返回本次 MOTOR_DONE 后停止发送下一条。
+    if (gAngleSequenceRunning) {
+        if (!gAngleSequenceStopRequested) {
+            gAngleSequenceStopRequested = true;
+            setSendAngleBusy(ui);
+            addLog("Stop requested: wait for current MOTOR_DONE, then no next angle will be sent");
+        }
         return;
     }
 
-    QString cmd = QString("ANGLE:%1").arg(angle);
+    if (gMotorMoving) {
+        addLog("Motor is moving, wait for MOTOR_DONE before sending next angle");
+        return;
+    }
+
+    if (socket->state() != QAbstractSocket::ConnectedState) {
+        addLog("Not connected");
+        return;
+    }
+
+    QString angleText = ui->angleEdit->text().trimmed();
+
+    if (angleText.isEmpty()) {
+        return;
+    }
+
+    bool ok = false;
+    double angleValue = angleText.toDouble(&ok);
+
+    if (!ok) {
+        addLog("Angle format error");
+        return;
+    }
+
+    double firstAngle = angleValue;
+
+    if (currentAngleSendMode() == MODE_BACK_AND_FORTH) {
+        // 来回旋转模式：+A, -A, +A, -A ... 无限循环。
+        // 每一段都必须等 ESP32 返回 MOTOR_DONE 后才会发下一段。
+        gAngleSequenceRunning = true;
+        gAngleSequenceStopRequested = false;
+        gBackAndForthBaseAngle = angleValue;
+        gBackAndForthSentCount = 1;
+        firstAngle = angleValue;
+
+        addLog(
+            QString("Back-and-forth infinite start: first=%1, then alternate %2 / %3")
+                .arg(formatAngleForCommand(firstAngle))
+                .arg(formatAngleForCommand(angleValue))
+                .arg(formatAngleForCommand(-angleValue))
+            );
+    } else {
+        // 单次发送角度模式。
+        gAngleSequenceRunning = false;
+        gAngleSequenceStopRequested = false;
+        gBackAndForthBaseAngle = 0.0;
+        gBackAndForthSentCount = 0;
+    }
+
+    // 先锁定状态：单次模式收到 MOTOR_DONE 后解除；
+    // 来回旋转模式收到 MOTOR_DONE 后继续发下一段，直到按下停止按钮。
+    gMotorMoving = true;
+    setSendAngleBusy(ui);
+
+    QString cmd = QString("ANGLE:%1").arg(formatAngleForCommand(firstAngle));
     sendCommand(cmd);
 }
 

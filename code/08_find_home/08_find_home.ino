@@ -144,6 +144,18 @@ int lastMoveDir = 0;
 #define MOTOR_DIR_INVERT 1
 
 // =====================================================
+// 上位机异步通知参数
+// =====================================================
+// 电机任务只把完成消息放进队列，不直接写 TCP，避免 WiFi 发送阻塞电机控制任务
+#define NOTIFY_QUEUE_LENGTH 10
+#define NOTIFY_TEXT_LEN 256
+
+// 相对运动残差补偿限幅。
+// 闭环到位有容差，连续 120+120+120 时，每次少走的几度会自动补到下一次。
+// 限幅避免编码器异常时补偿过大。
+#define MOTION_RESIDUAL_LIMIT_ANGLE 30.0f
+
+// =====================================================
 // FreeRTOS
 // =====================================================
 struct MotorMoveCommand {
@@ -152,7 +164,19 @@ struct MotorMoveCommand {
   bool savePosition;    // 这次运动结束后是否更新 Flash 里的累计角度
 };
 
+struct UpperNotifyMessage {
+  char text[NOTIFY_TEXT_LEN];
+};
+
 QueueHandle_t targetQueue;
+QueueHandle_t notifyQueue;
+
+SemaphoreHandle_t tcpClientMutex;
+WiFiClient activeClient;
+bool activeClientValid = false;
+
+// 连续相对运动的累计残差：正数表示前面少走了，需要下一次多补；负数表示前面多走了，需要下一次少走。
+float motionResidualAngle = 0.0f;
 
 volatile long encoderCount = 0;
 volatile int lastCLK = 0;
@@ -245,6 +269,78 @@ String getDirectionName(int dir) {
   return "NONE";
 }
 
+void limitMotionResidual() {
+  if (motionResidualAngle > MOTION_RESIDUAL_LIMIT_ANGLE) {
+    motionResidualAngle = MOTION_RESIDUAL_LIMIT_ANGLE;
+  }
+
+  if (motionResidualAngle < -MOTION_RESIDUAL_LIMIT_ANGLE) {
+    motionResidualAngle = -MOTION_RESIDUAL_LIMIT_ANGLE;
+  }
+}
+
+float getResidualCompensationForMove(float requestedAngle) {
+  int dir = getMoveDirection(requestedAngle);
+
+  if (dir == 0) {
+    return 0.0f;
+  }
+
+  float comp = motionResidualAngle;
+
+  if (comp > MOTION_RESIDUAL_LIMIT_ANGLE) {
+    comp = MOTION_RESIDUAL_LIMIT_ANGLE;
+  }
+
+  if (comp < -MOTION_RESIDUAL_LIMIT_ANGLE) {
+    comp = -MOTION_RESIDUAL_LIMIT_ANGLE;
+  }
+
+  // 不允许补偿把本次运动方向反过来，避免小角度命令被历史残差带反。
+  if (getMoveDirection(requestedAngle + comp) != dir) {
+    return 0.0f;
+  }
+
+  return comp;
+}
+
+String getMotionResidualString() {
+  return "RESIDUAL=" + String(motionResidualAngle, 2) +
+         " LIMIT=" + String(MOTION_RESIDUAL_LIMIT_ANGLE, 2);
+}
+
+void enqueueUpperNotify(String msg) {
+  if (notifyQueue == NULL) {
+    Serial.print("WARN: notify queue not ready, drop: ");
+    Serial.println(msg);
+    return;
+  }
+
+  UpperNotifyMessage item;
+  memset(&item, 0, sizeof(item));
+  msg.toCharArray(item.text, NOTIFY_TEXT_LEN);
+
+  if (xQueueSend(notifyQueue, &item, 0) != pdTRUE) {
+    Serial.print("WARN: notify queue full, drop: ");
+    Serial.println(item.text);
+  }
+}
+
+void sendTcpLineToActiveClient(String line) {
+  if (tcpClientMutex == NULL) {
+    return;
+  }
+
+  if (xSemaphoreTake(tcpClientMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+    if (activeClientValid && activeClient && activeClient.connected()) {
+      activeClient.println(line);
+      activeClient.flush();
+    }
+
+    xSemaphoreGive(tcpClientMutex);
+  }
+}
+
 // =====================================================
 // Flash Config Functions
 // =====================================================
@@ -268,7 +364,8 @@ String getConfigString() {
          " AUTO_HOME_FLASH=" + String(ENABLE_AUTO_HOME_FLASH == 1 ? "ON" : "OFF") +
          " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
          " BACKLASH=" + String(backlashCompAngle, 2) +
-         " LAST_DIR=" + getDirectionName(lastMoveDir);
+         " LAST_DIR=" + getDirectionName(lastMoveDir) +
+         " RESIDUAL=" + String(motionResidualAngle, 2);
 }
 
 void loadConfigFromFlash() {
@@ -370,6 +467,7 @@ void resetConfigToDefault() {
   backlashCompAngle = DEFAULT_BACKLASH_COMP_ANGLE;
   savedHomeOffsetAngle = 0.0f;
   lastMoveDir = 0;
+  motionResidualAngle = 0.0f;
 
   updateDerivedParams();
 
@@ -400,6 +498,7 @@ String getHomeString() {
          " HOME_BACK=" + String(getAutoHomeMoveAngle(), 2) +
          " BACKLASH=" + String(backlashCompAngle, 2) +
          " LAST_DIR=" + getDirectionName(lastMoveDir) +
+         " RESIDUAL=" + String(motionResidualAngle, 2) +
          " ENCODER=" + String(getEncoderCount()) +
          " CURRENT_ANGLE=" + String(getRealAngleTotal(), 2);
 }
@@ -440,6 +539,7 @@ void clearSavedHomeOffset(bool alsoResetEncoder) {
   if (alsoResetEncoder) {
     setEncoderCount(0);
     lastMoveDir = 0;
+    motionResidualAngle = 0.0f;
   }
 
   saveHomeOffsetToFlash();
@@ -894,6 +994,18 @@ String handleCommand(String cmd) {
   }
 
   // =====================================================
+  // 相对运动残差查询 / 清零
+  // =====================================================
+  if (cmd == "RESIDUAL?") {
+    return getMotionResidualString();
+  }
+
+  if (cmd == "RESIDUAL_ZERO") {
+    motionResidualAngle = 0.0f;
+    return "OK RESIDUAL_ZERO " + getMotionResidualString();
+  }
+
+  // =====================================================
   // 支持 ANGLE:90
   // =====================================================
   if (cmd.startsWith("ANGLE:")) {
@@ -937,7 +1049,14 @@ void wifiServerTask(void* pvParameters) {
 
     if (client) {
       Serial.println("Client Connected");
-      client.println("ESP32 READY");
+
+      if (xSemaphoreTake(tcpClientMutex, portMAX_DELAY) == pdTRUE) {
+        activeClient = client;
+        activeClientValid = true;
+        xSemaphoreGive(tcpClientMutex);
+      }
+
+      sendTcpLineToActiveClient("ESP32 READY");
 
       while (client.connected()) {
         if (client.available()) {
@@ -949,7 +1068,7 @@ void wifiServerTask(void* pvParameters) {
 
           String reply = handleCommand(cmd);
 
-          client.println(reply);
+          sendTcpLineToActiveClient(reply);
 
           Serial.print("Reply: ");
           Serial.println(reply);
@@ -958,11 +1077,33 @@ void wifiServerTask(void* pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(10));
       }
 
+      if (xSemaphoreTake(tcpClientMutex, portMAX_DELAY) == pdTRUE) {
+        activeClientValid = false;
+        activeClient.stop();
+        activeClient = WiFiClient();
+        xSemaphoreGive(tcpClientMutex);
+      }
+
       client.stop();
       Serial.println("Client Disconnected");
     }
 
     vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+// =====================================================
+// 上位机通知 Task
+// =====================================================
+void upperNotifyTask(void* pvParameters) {
+  UpperNotifyMessage msg;
+
+  while (true) {
+    if (xQueueReceive(notifyQueue, &msg, portMAX_DELAY)) {
+      // 串口也打印一份，方便调试；TCP 发送由本任务异步完成，不阻塞电机任务。
+      Serial.println(msg.text);
+      sendTcpLineToActiveClient(String(msg.text));
+    }
   }
 }
 
@@ -997,6 +1138,13 @@ void closedLoopTask(void* pvParameters) {
       float requestedAngle = moveCmd.angle;
       int currentMoveDir = getMoveDirection(requestedAngle);
 
+      float residualBeforeMove = motionResidualAngle;
+      float residualComp = 0.0f;
+
+      if (!moveCmd.zeroAfterMove) {
+        residualComp = getResidualCompensationForMove(requestedAngle);
+      }
+
       float backlashComp = 0.0f;
       bool backlashApplied = false;
 
@@ -1006,7 +1154,8 @@ void closedLoopTask(void* pvParameters) {
         backlashApplied = true;
       }
 
-      float moveAngle = requestedAngle + backlashComp;
+      float compensatedRequestAngle = requestedAngle + residualComp;
+      float moveAngle = compensatedRequestAngle + backlashComp;
       float startAngle = getRealAngleTotal();
       float targetAngle = startAngle + moveAngle;
 
@@ -1014,6 +1163,10 @@ void closedLoopTask(void* pvParameters) {
       Serial.print(moveAngle);
       Serial.print(" deg | Requested: ");
       Serial.print(requestedAngle);
+      Serial.print(" deg | ResidualComp: ");
+      Serial.print(residualComp);
+      Serial.print(" deg | ResidualBefore: ");
+      Serial.print(residualBeforeMove);
       Serial.print(" deg | BacklashComp: ");
       Serial.print(backlashComp);
       Serial.print(" deg | LastDir: ");
@@ -1074,6 +1227,7 @@ void closedLoopTask(void* pvParameters) {
       unsigned long lastPidUs = micros();
 
       bool arrived = false;
+      String stopReason = "UNKNOWN";
       float finalAngle = startAngle;
 
       while (true) {
@@ -1088,6 +1242,7 @@ void closedLoopTask(void* pvParameters) {
         // =====================================================
         if (absError <= angleTolerance) {
           arrived = true;
+          stopReason = "OK";
 
           Serial.print("Arrived. Angle: ");
           Serial.print(currentAngle);
@@ -1102,6 +1257,7 @@ void closedLoopTask(void* pvParameters) {
         // 超时保护
         // =====================================================
         if (millis() - startMs > MOVE_TIMEOUT_MS) {
+          stopReason = "TIMEOUT";
           Serial.print("ERR: pid move timeout | Current: ");
           Serial.print(currentAngle);
           Serial.print(" deg | Error: ");
@@ -1113,6 +1269,7 @@ void closedLoopTask(void* pvParameters) {
         // 步数保护
         // =====================================================
         if (stepCounter >= maxAllowedSteps) {
+          stopReason = "STEP_GUARD";
           Serial.print("ERR: too many steps | Current: ");
           Serial.print(currentAngle);
           Serial.print(" deg | Error: ");
@@ -1230,6 +1387,17 @@ void closedLoopTask(void* pvParameters) {
       // 一次运动结束后再写 Flash，避免每一步写 Flash 导致寿命下降
       // =====================================================
       float actualDelta = finalAngle - startAngle;
+      float logicalActualDelta = actualDelta - backlashComp;
+
+      if (!moveCmd.zeroAfterMove && currentMoveDir != 0) {
+        if (arrived) {
+          motionResidualAngle = residualBeforeMove + requestedAngle - logicalActualDelta;
+          limitMotionResidual();
+        } else {
+          // 运动失败时不要保留历史残差，避免下一次补偿异常放大。
+          motionResidualAngle = 0.0f;
+        }
+      }
 
       if (moveCmd.savePosition) {
 
@@ -1275,6 +1443,22 @@ void closedLoopTask(void* pvParameters) {
           Serial.println(getDirectionName(lastMoveDir));
         }
       }
+
+      String doneMsg =
+        String("MOTOR_DONE STATUS=") + stopReason +
+        " REQUEST=" + String(requestedAngle, 2) +
+        " RESIDUAL_COMP=" + String(residualComp, 2) +
+        " MOVE=" + String(moveAngle, 2) +
+        " ACTUAL=" + String(actualDelta, 2) +
+        " LOGICAL_ACTUAL=" + String(logicalActualDelta, 2) +
+        " FINAL=" + String(finalAngle, 2) +
+        " ERROR=" + String(targetAngle - finalAngle, 2) +
+        " STEPS=" + String(stepCounter) +
+        " RESIDUAL=" + String(motionResidualAngle, 2) +
+        " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
+        " LAST_DIR=" + getDirectionName(lastMoveDir);
+
+      enqueueUpperNotify(doneMsg);
     }
   }
 }
@@ -1303,6 +1487,9 @@ void statusTask(void* pvParameters) {
 
     Serial.print(" | LastDir: ");
     Serial.print(getDirectionName(lastMoveDir));
+
+    Serial.print(" | Residual: ");
+    Serial.print(motionResidualAngle);
 
     Serial.print(" | SW: ");
     Serial.println(swState == LOW ? "PRESSED" : "RELEASED");
@@ -1344,9 +1531,11 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(ENCODE_CLK), encoderISR, CHANGE);
 
   targetQueue = xQueueCreate(10, sizeof(MotorMoveCommand));
+  notifyQueue = xQueueCreate(NOTIFY_QUEUE_LENGTH, sizeof(UpperNotifyMessage));
+  tcpClientMutex = xSemaphoreCreateMutex();
 
-  if (targetQueue == NULL) {
-    Serial.println("ERR: queue create failed");
+  if (targetQueue == NULL || notifyQueue == NULL || tcpClientMutex == NULL) {
+    Serial.println("ERR: queue/mutex create failed");
     while (true) {
       delay(1000);
     }
@@ -1376,6 +1565,16 @@ void setup() {
   xTaskCreatePinnedToCore(
     wifiServerTask,
     "WiFi Server Task",
+    4096,
+    NULL,
+    1,
+    NULL,
+    0
+  );
+
+  xTaskCreatePinnedToCore(
+    upperNotifyTask,
+    "Upper Notify Task",
     4096,
     NULL,
     1,
@@ -1433,6 +1632,7 @@ void setup() {
   Serial.println("Home commands: HOME? / POS? / HOME_ZERO / ZERO / HOME:60");
   Serial.println("Set ENABLE_AUTO_HOME_FLASH to 1 to enable Flash home, 0 to disable it");
   Serial.println("Backlash commands: BACKLASH? / BACKLASH:5, use CFG_SAVE to persist");
+  Serial.println("Residual commands: RESIDUAL? / RESIDUAL_ZERO");
 }
 
 // =====================================================

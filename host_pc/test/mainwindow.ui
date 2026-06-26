@@ -370,7 +370,7 @@ font-weight: bold;</string>
    <widget class="QPushButton" name="sendAngleButton">
     <property name="geometry">
      <rect>
-      <x>520</x>
+      <x>720</x>
       <y>700</y>
       <width>251</width>
       <height>111</height>
@@ -591,7 +591,7 @@ font-weight: bold;</string>
    <widget class="QPushButton" name="btnSaveParameter">
     <property name="geometry">
      <rect>
-      <x>870</x>
+      <x>1070</x>
       <y>700</y>
       <width>251</width>
       <height>111</height>
