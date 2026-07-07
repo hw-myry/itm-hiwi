@@ -62,7 +62,7 @@ const float DIRECTION_DEADBAND_ANGLE = 0.01f;
 // =====================================================
 // LED
 // =====================================================
-#define LED_PIN 48
+#define LED_PIN 38
 #define LED_COUNT 1
 
 Adafruit_NeoPixel pixels(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -74,9 +74,9 @@ bool ledEnabled = false;
 #define STEP_PIN 39
 #define DIR_PIN 40
 
-#define ENCODE_CLK 2
-#define ENCODE_DT 42
-#define ENCODE_SW 41
+#define ENCODE_CLK 5
+#define ENCODE_DT 6
+#define ENCODE_SW 7
 
 // 如果驱动器没有细分，1个STEP = 1.8度
 // 如果16细分，改成：1.8 / 16.0
@@ -89,7 +89,7 @@ const float DEFAULT_KP = 5.0f;
 const float DEFAULT_KI = 0.015f;
 const float DEFAULT_KD = 0.0f;
 
-const float DEFAULT_SPEED_HZ = 1500.0f;
+const float DEFAULT_SPEED_HZ = 500.0f;
 // PID输出很小时的最低步进速度，避免快到目标时速度过慢
 // v3 提高最低速度，解决接近目标时太慢的问题
 const float DEFAULT_MIN_SPEED_HZ = 500.0f;

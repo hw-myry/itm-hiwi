@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>ESP32 RGB Controller</string>
+   <string>Stepper Motor Controller</string>
   </property>
   <property name="styleSheet">
    <string notr="true">QMainWindow{
