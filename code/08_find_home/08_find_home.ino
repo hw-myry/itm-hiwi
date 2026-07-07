@@ -93,8 +93,20 @@ const float DEFAULT_SPEED_HZ = 500.0f;
 // PID输出很小时的最低步进速度，避免快到目标时速度过慢
 // v3 提高最低速度，解决接近目标时太慢的问题
 const float DEFAULT_MIN_SPEED_HZ = 500.0f;
-const float DEFAULT_ENCODER_COUNTS_PER_REV = 40.0f;
-const float DEFAULT_ANGLE_TOLERANCE = 4.5f;
+
+// =====================================================
+// 编码器 / 输出角度换算
+// =====================================================
+// 你的EC11实测：1 count = 4.5度，所以EC11本身一圈 = 80 count。
+// 但当前机械结构里：实际输出轴角度 ≈ EC11编码器角度 × 2。
+// 因此：
+//   EC11角度 = encoderCount × 4.5
+//   输出角度 = EC11角度 × 2
+// 这样上位机发送 90 时，程序按输出角度闭环，实际输出约90度。
+const float FIXED_ENCODER_DEG_PER_COUNT = 4.5f;
+const float OUTPUT_ANGLE_PER_ENCODER_ANGLE = 2.0f;
+const float DEFAULT_ENCODER_COUNTS_PER_REV = 360.0f / FIXED_ENCODER_DEG_PER_COUNT;  // 80 count/rev
+const float DEFAULT_ANGLE_TOLERANCE = 4.5f;  // 输出角度容差，约等于半个输出count
 
 // =====================================================
 // 运行时参数：开机从 Flash 读取，也可以通过命令修改
@@ -107,7 +119,7 @@ float speedHz = DEFAULT_SPEED_HZ;
 float minSpeedHz = DEFAULT_MIN_SPEED_HZ;
 
 float encoderCountsPerRev = DEFAULT_ENCODER_COUNTS_PER_REV;
-float encoderDegPerCount = 360.0f / DEFAULT_ENCODER_COUNTS_PER_REV;
+float encoderDegPerCount = FIXED_ENCODER_DEG_PER_COUNT;
 
 float angleTolerance = DEFAULT_ANGLE_TOLERANCE;
 
@@ -149,12 +161,25 @@ int lastMoveDir = 0;
 // =====================================================
 // 电机任务只把完成消息放进队列，不直接写 TCP，避免 WiFi 发送阻塞电机控制任务
 #define NOTIFY_QUEUE_LENGTH 10
-#define NOTIFY_TEXT_LEN 256
+#define NOTIFY_TEXT_LEN 512
 
 // 相对运动残差补偿限幅。
 // 闭环到位有容差，连续 120+120+120 时，每次少走的几度会自动补到下一次。
 // 限幅避免编码器异常时补偿过大。
 #define MOTION_RESIDUAL_LIMIT_ANGLE 30.0f
+
+// =====================================================
+// 运动结束后的开环微调
+// =====================================================
+// 主PID停下后，再比较一次 targetAngle 和 Current Angle。
+// 如果偏差仍然超过 POST_CORRECT_TOLERANCE，就不用PID，按偏差角度开环补转一次。
+// 注意：你的当前输出角度分辨率约为 9 度/count，所以默认容差设为 4.5 度。
+#define POST_CORRECT_ENABLE 1
+#define POST_CORRECT_MAX_ROUNDS 1
+const float POST_CORRECT_TOLERANCE = 4.5f;
+const float POST_CORRECT_MAX_ANGLE = 20.0f;
+const float POST_CORRECT_SPEED_HZ = 300.0f;
+const uint32_t POST_CORRECT_SETTLE_MS = 120;
 
 // =====================================================
 // FreeRTOS
@@ -255,9 +280,33 @@ void setEncoderCount(long newCount) {
   interrupts();
 }
 
-float getRealAngleTotal() {
+float getEncoderAngleTotal() {
   long countCopy = getEncoderCount();
   return countCopy * encoderDegPerCount;
+}
+
+float getRealAngleTotal() {
+  // 对外/闭环使用“实际输出轴角度”。
+  // EC11本身仍然是 1 count = 4.5度，只是在这里乘以机械换算比例。
+  return getEncoderAngleTotal() * OUTPUT_ANGLE_PER_ENCODER_ANGLE;
+}
+
+float getOutputDegPerEncoderCount() {
+  return encoderDegPerCount * OUTPUT_ANGLE_PER_ENCODER_ANGLE;
+}
+
+long angleToEncoderCount(float angle) {
+  float degPerCount = getOutputDegPerEncoderCount();
+
+  if (fabs(degPerCount) < 0.000001f) {
+    return 0;
+  }
+
+  return lround(angle / degPerCount);
+}
+
+void setCurrentAngleTotal(float newAngle) {
+  setEncoderCount(angleToEncoderCount(newAngle));
 }
 
 int getMoveDirection(float angle) {
@@ -282,6 +331,13 @@ String getDirectionName(int dir) {
   }
 
   return "NONE";
+}
+
+String getCurrentAngleString() {
+  return "CURRENT=" + String(getRealAngleTotal(), 2) +
+         " ENCODER=" + String(getEncoderCount()) +
+         " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
+         " LAST_DIR=" + getDirectionName(lastMoveDir);
 }
 
 void limitMotionResidual() {
@@ -360,11 +416,10 @@ void sendTcpLineToActiveClient(String line) {
 // Flash Config Functions
 // =====================================================
 void updateDerivedParams() {
-  if (encoderCountsPerRev < 1.0f) {
-    encoderCountsPerRev = DEFAULT_ENCODER_COUNTS_PER_REV;
-  }
-
-  encoderDegPerCount = 360.0f / encoderCountsPerRev;
+  // 固定使用你实测的EC11精度：1 count = 4.5度。
+  // 不再让Flash旧参数或上位机误设置把CPR改回40。
+  encoderCountsPerRev = DEFAULT_ENCODER_COUNTS_PER_REV;
+  encoderDegPerCount = FIXED_ENCODER_DEG_PER_COUNT;
 }
 
 String getConfigString() {
@@ -394,7 +449,8 @@ void loadConfigFromFlash() {
 
   speedHz = prefs.getFloat("speed", DEFAULT_SPEED_HZ);
   minSpeedHz = prefs.getFloat("minspd", DEFAULT_MIN_SPEED_HZ);
-  encoderCountsPerRev = prefs.getFloat("cpr", DEFAULT_ENCODER_COUNTS_PER_REV);
+  // 固定EC11精度，不读取Flash里的旧CPR，避免旧的40覆盖当前80。
+  encoderCountsPerRev = DEFAULT_ENCODER_COUNTS_PER_REV;
   angleTolerance = prefs.getFloat("tol", DEFAULT_ANGLE_TOLERANCE);
   backlashCompAngle = prefs.getFloat(FLASH_KEY_BACKLASH, DEFAULT_BACKLASH_COMP_ANGLE);
 
@@ -570,6 +626,51 @@ void oneStepWithDelay(bool dir, uint32_t halfPeriodUs) {
 
   digitalWrite(STEP_PIN, LOW);
   delayMicroseconds(halfPeriodUs);
+}
+
+long openLoopRotateAngle(float angle, float rotateSpeedHz) {
+  int dirSign = getMoveDirection(angle);
+
+  if (dirSign == 0) {
+    return 0;
+  }
+
+  float localSpeed = rotateSpeedHz;
+
+  if (localSpeed < 1.0f) {
+    localSpeed = 1.0f;
+  }
+
+  if (localSpeed > 3000.0f) {
+    localSpeed = 3000.0f;
+  }
+
+  uint32_t halfPeriodUs = (uint32_t)(1000000.0f / localSpeed / 2.0f);
+
+  if (halfPeriodUs < 50) {
+    halfPeriodUs = 50;
+  }
+
+  long steps = lround(fabs(angle) / STEP_ANGLE);
+
+  if (steps < 1) {
+    steps = 1;
+  }
+
+  bool dir = angle > 0.0f;
+  unsigned long lastYieldMs = millis();
+
+  for (long i = 0; i < steps; i++) {
+    oneStepWithDelay(dir, halfPeriodUs);
+
+    unsigned long nowMs = millis();
+    if (nowMs - lastYieldMs >= MOTOR_TASK_YIELD_INTERVAL_MS) {
+      lastYieldMs = nowMs;
+      vTaskDelay(pdMS_TO_TICKS(1));
+    }
+  }
+
+  return steps;
 }
 
 // =====================================================
@@ -844,7 +945,7 @@ String handleCommand(String cmd) {
   }
 
   // =====================================================
-  // 编码器比例设置：ENCODER:40
+  // 编码器比例设置：保留命令兼容，但本版本固定为 CPR=80，1 count=4.5度
   // 只改 RAM，不立刻写 Flash
   // =====================================================
   if (cmd.startsWith("ENCODER:")) {
@@ -934,14 +1035,44 @@ String handleCommand(String cmd) {
   // =====================================================
   // 当前角度查询
   // =====================================================
-  if (cmd == "ANGLE?") {
-    long enc = getEncoderCount();
-    float angle = getRealAngleTotal();
+  if (cmd == "ANGLE?" || cmd == "CURRENT?") {
+    return "ANGLE " + getCurrentAngleString();
+  }
 
-    return "ANGLE CURRENT=" + String(angle, 2) +
-           " ENCODER=" + String(enc) +
-           " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
-           " LAST_DIR=" + getDirectionName(lastMoveDir);
+  // =====================================================
+  // 手动修改 Current Angle 显示值：只改编码器计数，不转电机，也不改 HOME_POS。
+  // 命令：CURRENT:90 / ANGLE_SET:90
+  // 如果要把 Current Angle 强制同步到 HOME_POS，发 CURRENT_SYNC_HOME。
+  // =====================================================
+  if (cmd.startsWith("CURRENT:") || cmd.startsWith("ANGLE_SET:")) {
+    String data;
+
+    if (cmd.startsWith("CURRENT:")) {
+      data = cmd.substring(8);
+    } else {
+      data = cmd.substring(10);
+    }
+
+    data.trim();
+
+    if (isValidNumber(data)) {
+      float newCurrent = data.toFloat();
+
+      if (newCurrent < -64800.0f || newCurrent > 64800.0f) {
+        return "ERR CURRENT RANGE";
+      }
+
+      setCurrentAngleTotal(newCurrent);
+
+      return "OK CURRENT_SET " + getCurrentAngleString();
+    }
+
+    return "ERR CURRENT FORMAT";
+  }
+
+  if (cmd == "CURRENT_SYNC_HOME" || cmd == "ANGLE_SYNC_HOME") {
+    setCurrentAngleTotal(savedHomeOffsetAngle);
+    return "OK CURRENT_SYNC_HOME " + getCurrentAngleString();
   }
 
   // =====================================================
@@ -1234,6 +1365,11 @@ void closedLoopTask(void* pvParameters) {
       String stopReason = "UNKNOWN";
       float finalAngle = startAngle;
 
+      long postCorrectSteps = 0;
+      int postCorrectRounds = 0;
+      float postCorrectErrorBefore = 0.0f;
+      float postCorrectErrorAfter = 0.0f;
+
       while (true) {
         float currentAngle = getRealAngleTotal();
         finalAngle = currentAngle;
@@ -1388,6 +1524,80 @@ void closedLoopTask(void* pvParameters) {
       }
 
       // =====================================================
+      // 运动结束后开环微调：比较目标角度和当前角度，有偏差就纯步进补转一次
+      // =====================================================
+      postCorrectErrorBefore = targetAngle - getRealAngleTotal();
+      postCorrectErrorAfter = postCorrectErrorBefore;
+
+#if POST_CORRECT_ENABLE == 1
+      bool canPostCorrect =
+        fabs(postCorrectErrorBefore) > POST_CORRECT_TOLERANCE &&
+        fabs(postCorrectErrorBefore) <= POST_CORRECT_MAX_ANGLE;
+
+      if (canPostCorrect) {
+        for (int round = 0; round < POST_CORRECT_MAX_ROUNDS; round++) {
+          float correctionError = targetAngle - getRealAngleTotal();
+
+          if (fabs(correctionError) <= POST_CORRECT_TOLERANCE) {
+            break;
+          }
+
+          float correctionAngle = correctionError;
+
+          if (correctionAngle > POST_CORRECT_MAX_ANGLE) {
+            correctionAngle = POST_CORRECT_MAX_ANGLE;
+          }
+
+          if (correctionAngle < -POST_CORRECT_MAX_ANGLE) {
+            correctionAngle = -POST_CORRECT_MAX_ANGLE;
+          }
+
+          Serial.print("Post-correct open loop | Target: ");
+          Serial.print(targetAngle, 2);
+          Serial.print(" deg | Current: ");
+          Serial.print(getRealAngleTotal(), 2);
+          Serial.print(" deg | Error: ");
+          Serial.print(correctionError, 2);
+          Serial.print(" deg | Rotate: ");
+          Serial.print(correctionAngle, 2);
+          Serial.println(" deg");
+
+          long steps = openLoopRotateAngle(correctionAngle, POST_CORRECT_SPEED_HZ);
+          postCorrectSteps += steps;
+          postCorrectRounds++;
+
+          vTaskDelay(pdMS_TO_TICKS(POST_CORRECT_SETTLE_MS));
+        }
+
+        finalAngle = getRealAngleTotal();
+        postCorrectErrorAfter = targetAngle - finalAngle;
+
+        if (fabs(postCorrectErrorAfter) <= angleTolerance ||
+            fabs(postCorrectErrorAfter) <= POST_CORRECT_TOLERANCE) {
+          arrived = true;
+          stopReason = "POST_CORRECT_OK";
+        } else {
+          stopReason = "POST_CORRECT_LEFT_ERROR";
+        }
+
+        Serial.print("Post-correct done | Final: ");
+        Serial.print(finalAngle, 2);
+        Serial.print(" deg | ErrorAfter: ");
+        Serial.print(postCorrectErrorAfter, 2);
+        Serial.print(" deg | Rounds: ");
+        Serial.print(postCorrectRounds);
+        Serial.print(" | Steps: ");
+        Serial.println(postCorrectSteps);
+      } else {
+        finalAngle = getRealAngleTotal();
+        postCorrectErrorAfter = targetAngle - finalAngle;
+      }
+#else
+      finalAngle = getRealAngleTotal();
+      postCorrectErrorAfter = targetAngle - finalAngle;
+#endif
+
+      // =====================================================
       // 一次运动结束后再写 Flash，避免每一步写 Flash 导致寿命下降
       // =====================================================
       float actualDelta = finalAngle - startAngle;
@@ -1458,6 +1668,10 @@ void closedLoopTask(void* pvParameters) {
         " FINAL=" + String(finalAngle, 2) +
         " ERROR=" + String(targetAngle - finalAngle, 2) +
         " STEPS=" + String(stepCounter) +
+        " POST_ROUNDS=" + String(postCorrectRounds) +
+        " POST_STEPS=" + String(postCorrectSteps) +
+        " POST_ERR_BEFORE=" + String(postCorrectErrorBefore, 2) +
+        " POST_ERR_AFTER=" + String(postCorrectErrorAfter, 2) +
         " RESIDUAL=" + String(motionResidualAngle, 2) +
         " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
         " LAST_DIR=" + getDirectionName(lastMoveDir);
@@ -1473,7 +1687,8 @@ void closedLoopTask(void* pvParameters) {
 void statusTask(void* pvParameters) {
   while (true) {
     long encCopy = getEncoderCount();
-    float realAngleTotal = encCopy * encoderDegPerCount;
+    float encoderAngleTotal = encCopy * encoderDegPerCount;
+    float realAngleTotal = encoderAngleTotal * OUTPUT_ANGLE_PER_ENCODER_ANGLE;
     float realAngle360 = normalizeAngle(realAngleTotal);
     bool swState = digitalRead(ENCODE_SW);
 
@@ -1482,6 +1697,9 @@ void statusTask(void* pvParameters) {
 
     Serial.print(" | Angle360: ");
     Serial.print(realAngle360);
+
+    Serial.print(" | EncoderAngle: ");
+    Serial.print(encoderAngleTotal);
 
     Serial.print(" | Total: ");
     Serial.print(realAngleTotal);
@@ -1631,8 +1849,10 @@ void setup() {
   );
 
   Serial.println("Input angle via Serial or WiFi, e.g. 90 / -180 / ANGLE:45");
+  Serial.println("EC11 fixed: 1 count = 4.5 deg, output angle = EC11 angle * 2");
   Serial.println("v3 fast defaults: SPEED=1500 step/s, MIN_SPEED=500 step/s");
   Serial.println("Config commands: CFG? / CFG_SAVE / CFG_RESET / PID? / SPEED? / MINSPEED? / ENCODER? / TOL? / BACKLASH?");
+  Serial.println("Angle commands: ANGLE? / CURRENT? / CURRENT:90 / ANGLE_SET:90 / CURRENT_SYNC_HOME");
   Serial.println("Home commands: HOME? / POS? / HOME_ZERO / ZERO / HOME:60");
   Serial.println("Set ENABLE_AUTO_HOME_FLASH to 1 to enable Flash home, 0 to disable it");
   Serial.println("Backlash commands: BACKLASH? / BACKLASH:5, use CFG_SAVE to persist");
