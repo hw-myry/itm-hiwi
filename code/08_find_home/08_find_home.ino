@@ -176,7 +176,7 @@ int lastMoveDir = 0;
 // 注意：你的当前输出角度分辨率约为 9 度/count，所以默认容差设为 4.5 度。
 #define POST_CORRECT_ENABLE 1
 #define POST_CORRECT_MAX_ROUNDS 1
-const float POST_CORRECT_TOLERANCE = 4.5f;
+const float POST_CORRECT_TOLERANCE = 8.9f;
 const float POST_CORRECT_MAX_ANGLE = 20.0f;
 const float POST_CORRECT_SPEED_HZ = 300.0f;
 const uint32_t POST_CORRECT_SETTLE_MS = 120;

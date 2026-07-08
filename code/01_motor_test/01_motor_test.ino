@@ -1,5 +1,5 @@
-#define STEP_PIN 2
-#define DIR_PIN  1
+#define STEP_PIN 39
+#define DIR_PIN  40
 
 #define STEPS_PER_REV 6400   // 1600/3200/6400
 

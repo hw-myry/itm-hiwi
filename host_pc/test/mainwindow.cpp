@@ -12,6 +12,8 @@
 #include <QBoxLayout>
 #include <QGridLayout>
 #include <QPushButton>
+#include <QByteArray>
+#include <QStringList>
 
 // =====================================================
 // Motor send-angle state
@@ -40,6 +42,13 @@ int gBackAndForthSentCount = 0;   // Number of back-and-forth move segments alre
 QComboBox *gAngleModeCombo = nullptr;
 QLabel *gAngleModeLabel = nullptr;
 QPushButton *gResetAngleButton = nullptr;
+
+// Save Parameter 状态机：不要一次性把 PID/SPEED/CFG_SAVE 全部塞进 TCP。
+// 每收到 ESP32 对上一条命令的 OK 回复后，再发送下一条命令。
+bool gSaveParameterRunning = false;
+QStringList gSaveParameterCommands;
+int gSaveParameterStep = 0;
+int gSaveParameterSequenceId = 0;
 
 const char *SEND_ANGLE_SINGLE_IDLE_STYLE =
     "QPushButton {"
@@ -220,6 +229,37 @@ void setSendAngleBusy(Ui::MainWindow *ui)
     }
 }
 
+
+void hideParameterEditor(QWidget *editor, const QStringList &labelKeywords)
+{
+    if (editor == nullptr) {
+        return;
+    }
+
+    QWidget *parent = editor->parentWidget();
+    editor->hide();
+    editor->setEnabled(false);
+
+    if (parent == nullptr) {
+        return;
+    }
+
+    const QList<QLabel *> labels = parent->findChildren<QLabel *>();
+
+    for (QLabel *label : labels) {
+        QString text = label->text();
+        text.remove('&');
+
+        for (const QString &keyword : labelKeywords) {
+            if (text.contains(keyword, Qt::CaseInsensitive)) {
+                label->hide();
+                label->setEnabled(false);
+                break;
+            }
+        }
+    }
+}
+
 void setupAngleModeCombo(Ui::MainWindow *ui)
 {
     QWidget *parent = ui->sendAngleButton->parentWidget();
@@ -359,6 +399,12 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
+    // 确保 Save Parameter 按钮一定连接到保存函数。
+    // Qt Designer 自动连接依赖 objectName；这里再显式连接一次，避免按钮 objectName/自动连接异常导致点击无效。
+    connect(ui->btnSaveParameter, &QPushButton::clicked,
+            this, &MainWindow::on_btnSaveParameter_clicked,
+            Qt::UniqueConnection);
+
     socket = new QTcpSocket(this);
 
     // =====================================================
@@ -380,8 +426,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     ui->speedEdit->setText("500");
 
-    ui->CPREdit->setText("40");
-    ui->toleranceEdit->setText("4.5");
+    // CPR 和 Tolerance 由 ESP32 固件固定/默认处理，上位机不再显示和保存这两个参数。
+    hideParameterEditor(findChild<QWidget *>("CPREdit"), QStringList() << "CPR" << "Encoder CPR" << "Encoder");
+    hideParameterEditor(findChild<QWidget *>("toleranceEdit"), QStringList() << "Tolerance" << "TOL");
 
     ui->currentAngleEdit->setReadOnly(true);
 
@@ -434,13 +481,6 @@ MainWindow::MainWindow(QWidget *parent)
         new QDoubleValidator(1.0, 3000.0, 2, this)
         );
 
-    ui->CPREdit->setValidator(
-        new QDoubleValidator(1.0, 10000.0, 4, this)
-        );
-
-    ui->toleranceEdit->setValidator(
-        new QDoubleValidator(0.1, 30.0, 3, this)
-        );
 
     // =====================================================
     // Periodically read current angle
@@ -543,7 +583,14 @@ void MainWindow::sendCommand(const QString &cmd, bool showLog)
     }
 
     QString line = cmd.trimmed() + "\n";
-    socket->write(line.toUtf8());
+    QByteArray data = line.toUtf8();
+    qint64 written = socket->write(data);
+
+    if (written != data.size()) {
+        addLog("Socket write warning: " + socket->errorString());
+    }
+
+    socket->flush();
 
     if (showLog) {
         addLog("Send: " + cmd.trimmed());
@@ -592,19 +639,77 @@ void MainWindow::updateConfigEditsFromLine(const QString &line)
         ui->speedEdit->setText(v);
     }
 
-    v = valueFromLine(line, "CPR");
-    if (!v.isEmpty()) {
-        ui->CPREdit->setText(v);
-    }
-
-    v = valueFromLine(line, "TOL");
-    if (!v.isEmpty()) {
-        ui->toleranceEdit->setText(v);
-    }
 }
 
 void MainWindow::handleEsp32Line(const QString &line)
 {
+    // Save Parameter 状态机：
+    // step 0: 已发 PID，等待 OK PID
+    // step 1: 已发 SPEED，等待 OK SPEED
+    // step 2: 已发 CFG_SAVE，等待 OK CFG_SAVE
+    // step 3: 已发 CFG?，等待 CFG 回读
+    if (gSaveParameterRunning) {
+        if (line.startsWith("ERR") || line.startsWith("UNKNOWN CMD")) {
+            gSaveParameterRunning = false;
+            gSaveParameterCommands.clear();
+            gSaveParameterStep = 0;
+            ui->btnSaveParameter->setEnabled(true);
+            addLog("Save failed, ESP32 replied: " + line);
+            return;
+        }
+
+        bool advanceSaveStep = false;
+
+        if (gSaveParameterStep == 0 && line.startsWith("OK PID")) {
+            updateConfigEditsFromLine(line);
+            advanceSaveStep = true;
+        } else if (gSaveParameterStep == 1 && line.startsWith("OK SPEED")) {
+            updateConfigEditsFromLine(line);
+            advanceSaveStep = true;
+        } else if (gSaveParameterStep == 2 && line.startsWith("OK CFG_SAVE")) {
+            updateConfigEditsFromLine(line);
+            addLog("ESP32 confirmed: PID and Speed written to Flash");
+            advanceSaveStep = true;
+        } else if (gSaveParameterStep == 3 && line.startsWith("CFG ")) {
+            updateConfigEditsFromLine(line);
+            gSaveParameterRunning = false;
+            gSaveParameterCommands.clear();
+            gSaveParameterStep = 0;
+            ui->btnSaveParameter->setEnabled(true);
+            addLog("Save verified by CFG?: " + line);
+            return;
+        }
+
+        if (advanceSaveStep) {
+            gSaveParameterStep++;
+
+            if (gSaveParameterStep < gSaveParameterCommands.size()) {
+                const int sequenceId = gSaveParameterSequenceId;
+                const QString nextCmd = gSaveParameterCommands.at(gSaveParameterStep);
+
+                QTimer::singleShot(80, this, [=]() {
+                    if (!gSaveParameterRunning || sequenceId != gSaveParameterSequenceId) {
+                        return;
+                    }
+
+                    if (socket->state() != QAbstractSocket::ConnectedState) {
+                        gSaveParameterRunning = false;
+                        gSaveParameterCommands.clear();
+                        gSaveParameterStep = 0;
+                        ui->btnSaveParameter->setEnabled(true);
+                        addLog("Save stopped: disconnected before sending " + nextCmd);
+                        return;
+                    }
+
+                    sendCommand(nextCmd, true);
+                });
+            }
+
+            return;
+        }
+        // 其他行，比如周期 ANGLE? 回包，继续走普通解析，不影响保存状态机。
+    }
+
     // ESP32 sends this only after the motor actually stops: MOTOR_DONE STATUS=OK ...
     // Single mode: unlock the button after MOTOR_DONE.
     // Back-and-forth mode: after MOTOR_DONE, send the next segment unless stop was requested;
@@ -705,9 +810,15 @@ void MainWindow::handleEsp32Line(const QString &line)
         return;
     }
 
-    // CFG KP=... KI=... KD=... SPEED=... CPR=... TOL=...
+    // ESP32 confirmed that RAM parameters have been saved to Flash.
+    if (line.startsWith("OK CFG_SAVE")) {
+        updateConfigEditsFromLine(line);
+        addLog("ESP32 confirmed: PID and Speed saved to Flash");
+        return;
+    }
+
+    // CFG KP=... KI=... KD=... SPEED=...
     if (line.startsWith("CFG ") ||
-        line.startsWith("OK CFG_SAVE") ||
         line.startsWith("OK CFG_RESET")) {
         updateConfigEditsFromLine(line);
         return;
@@ -725,17 +836,6 @@ void MainWindow::handleEsp32Line(const QString &line)
         return;
     }
 
-    // ENCODER CPR=...
-    if (line.startsWith("ENCODER ") || line.startsWith("OK ENCODER")) {
-        updateConfigEditsFromLine(line);
-        return;
-    }
-
-    // TOL=...
-    if (line.startsWith("TOL=") || line.startsWith("OK TOL")) {
-        updateConfigEditsFromLine(line);
-        return;
-    }
 
     // ANGLE CURRENT=90.00 ENCODER=10
     if (line.startsWith("ANGLE CURRENT=")) {
@@ -893,27 +993,36 @@ void MainWindow::on_sendAngleButton_clicked()
 
 // =====================================================
 // Save Parameter
-// One button: send all parameters to ESP32 RAM, then save to Flash
+// One button: send PID + Speed to ESP32 RAM, then save to Flash
 // Commands:
 // PID:Kp,Ki,Kd
 // SPEED:Speed
-// ENCODER:CPR
-// TOL:Tolerance
 // CFG_SAVE
+// CFG?
 // =====================================================
 void MainWindow::on_btnSaveParameter_clicked()
 {
+    if (gSaveParameterRunning) {
+        addLog("Save already running, please wait for CFG? verification");
+        return;
+    }
+
+    if (gMotorMoving || gAngleSequenceRunning) {
+        addLog("Motor is moving, please save parameters after MOTOR_DONE");
+        return;
+    }
+
+    if (socket->state() != QAbstractSocket::ConnectedState) {
+        addLog("Not connected");
+        return;
+    }
+
     QString kp = ui->kpEdit->text().trimmed();
     QString ki = ui->kiEdit->text().trimmed();
     QString kd = ui->kdEdit->text().trimmed();
-
     QString speed = ui->speedEdit->text().trimmed();
 
-    QString cpr = ui->CPREdit->text().trimmed();
-    QString tol = ui->toleranceEdit->text().trimmed();
-
-    if (kp.isEmpty() || ki.isEmpty() || kd.isEmpty() ||
-        speed.isEmpty() || cpr.isEmpty() || tol.isEmpty()) {
+    if (kp.isEmpty() || ki.isEmpty() || kd.isEmpty() || speed.isEmpty()) {
         addLog("Parameter input empty");
         return;
     }
@@ -922,18 +1031,13 @@ void MainWindow::on_btnSaveParameter_clicked()
     bool okKi = false;
     bool okKd = false;
     bool okSpeed = false;
-    bool okCpr = false;
-    bool okTol = false;
 
     double kpVal = kp.toDouble(&okKp);
     double kiVal = ki.toDouble(&okKi);
     double kdVal = kd.toDouble(&okKd);
     double speedVal = speed.toDouble(&okSpeed);
-    double cprVal = cpr.toDouble(&okCpr);
-    double tolVal = tol.toDouble(&okTol);
 
-    if (!okKp || !okKi || !okKd ||
-        !okSpeed || !okCpr || !okTol) {
+    if (!okKp || !okKi || !okKd || !okSpeed) {
         addLog("Parameter format error");
         return;
     }
@@ -950,24 +1054,28 @@ void MainWindow::on_btnSaveParameter_clicked()
         return;
     }
 
-    if (cprVal < 1 || cprVal > 10000) {
-        addLog("Encoder CPR range error");
-        return;
-    }
+    gSaveParameterCommands.clear();
+    gSaveParameterCommands << QString("PID:%1,%2,%3").arg(kp).arg(ki).arg(kd)
+                           << QString("SPEED:%1").arg(speed)
+                           << QString("CFG_SAVE")
+                           << QString("CFG?");
 
-    if (tolVal < 0.1 || tolVal > 30) {
-        addLog("Tolerance range error");
-        return;
-    }
+    gSaveParameterRunning = true;
+    gSaveParameterStep = 0;
+    gSaveParameterSequenceId++;
+    ui->btnSaveParameter->setEnabled(false);
 
-    // 1. Send UI parameters to ESP32 RAM first
-    sendCommand(QString("PID:%1,%2,%3").arg(kp).arg(ki).arg(kd));
-    sendCommand(QString("SPEED:%1").arg(speed));
-    sendCommand(QString("ENCODER:%1").arg(cpr));
-    sendCommand(QString("TOL:%1").arg(tol));
+    addLog("Save started: PID -> SPEED -> CFG_SAVE -> CFG?");
+    sendCommand(gSaveParameterCommands.at(0), true);
 
-    // 2. Save current ESP32 RAM parameters to Flash
-    sendCommand("CFG_SAVE");
-
-    addLog("All parameters sent and saved to ESP32 Flash");
+    const int sequenceId = gSaveParameterSequenceId;
+    QTimer::singleShot(6000, this, [=]() {
+        if (gSaveParameterRunning && sequenceId == gSaveParameterSequenceId) {
+            gSaveParameterRunning = false;
+            gSaveParameterCommands.clear();
+            gSaveParameterStep = 0;
+            ui->btnSaveParameter->setEnabled(true);
+            addLog("Save timeout: did not receive expected ESP32 reply. Check ESP32 log for OK PID / OK SPEED / OK CFG_SAVE / CFG");
+        }
+    });
 }
