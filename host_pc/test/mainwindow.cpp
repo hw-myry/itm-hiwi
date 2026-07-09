@@ -47,6 +47,7 @@ QLabel *gAngleModeLabel = nullptr;
 QPushButton *gResetAngleButton = nullptr;
 QLabel *gSendAngleStatusLabel = nullptr;
 QPushButton *gEstopButton = nullptr;
+QPushButton *gRestartEsp32Button = nullptr;
 QLineEdit *gAbsAngleLimitEdit = nullptr;
 QLabel *gAbsAngleLimitLabel = nullptr;
 bool gEstopActive = false;
@@ -174,25 +175,41 @@ const char *ESTOP_UNLOCK_BUTTON_STYLE =
     " background-color: #1b5e20;"
     "}";
 
+const char *RESTART_ESP32_BUTTON_STYLE =
+    "QPushButton {"
+    " background-color: #fb8c00;"
+    " color: white;"
+    " font-weight: bold;"
+    " font-size: 16px;"
+    " border-radius: 6px;"
+    " padding: 8px 14px;"
+    "}"
+    "QPushButton:hover {"
+    " background-color: #ef6c00;"
+    "}"
+    "QPushButton:pressed {"
+    " background-color: #e65100;"
+    "}";
+
 const char *SEND_ANGLE_STATUS_IDLE_STYLE =
     "QLabel {"
     " color: #7f8c8d;"
     " font-weight: bold;"
-    " font-size: 18px;"
+    " font-size: 24px;"
     "}";
 
 const char *SEND_ANGLE_STATUS_SUCCESS_STYLE =
     "QLabel {"
     " color: #1e88e5;"
     " font-weight: bold;"
-    " font-size: 20px;"
+    " font-size: 32px;"
     "}";
 
 const char *SEND_ANGLE_STATUS_FAILED_STYLE =
     "QLabel {"
     " color: #e74c3c;"
     " font-weight: bold;"
-    " font-size: 20px;"
+    " font-size: 32px;"
     "}";
 
 int currentAngleSendMode()
@@ -279,72 +296,56 @@ void setSendAngleStatusFailed()
 
 void setupSendAngleStatusLabel(Ui::MainWindow *ui, QWidget *parent)
 {
-    if (parent == nullptr || ui == nullptr || ui->sendAngleButton == nullptr) {
+    if (ui == nullptr || ui->textBrowserLog == nullptr) {
         return;
     }
 
-    gSendAngleStatusLabel = parent->findChild<QLabel *>("sendAngleStatusLabel");
+    // 放到 Status Log 下方那个日志框(textBrowserLog)的右边，
+    // 不再放在 Send Angle 按钮左边。
+    QWidget *statusParent = ui->textBrowserLog->parentWidget();
+
+    if (statusParent == nullptr) {
+        statusParent = parent;
+    }
+
+    if (statusParent == nullptr) {
+        return;
+    }
+
+    gSendAngleStatusLabel = statusParent->findChild<QLabel *>("sendAngleStatusLabel");
 
     if (gSendAngleStatusLabel == nullptr) {
-        gSendAngleStatusLabel = new QLabel("", parent);
+        gSendAngleStatusLabel = new QLabel("", statusParent);
         gSendAngleStatusLabel->setObjectName("sendAngleStatusLabel");
-        gSendAngleStatusLabel->setAlignment(Qt::AlignCenter);
-        gSendAngleStatusLabel->setMinimumSize(110, 28);
-        gSendAngleStatusLabel->setStyleSheet(SEND_ANGLE_STATUS_IDLE_STYLE);
-
-        QLayout *layout = parent->layout();
-
-        if (QBoxLayout *boxLayout = qobject_cast<QBoxLayout *>(layout)) {
-            int buttonIndex = boxLayout->indexOf(ui->sendAngleButton);
-            if (buttonIndex < 0) {
-                buttonIndex = boxLayout->count();
-            }
-
-            // 放在 Send Angle 按钮左边。
-            boxLayout->insertWidget(buttonIndex, gSendAngleStatusLabel);
-        } else if (QGridLayout *gridLayout = qobject_cast<QGridLayout *>(layout)) {
-            int row = 0;
-            int column = 0;
-            int rowSpan = 1;
-            int columnSpan = 1;
-
-            int buttonIndex = gridLayout->indexOf(ui->sendAngleButton);
-            if (buttonIndex >= 0) {
-                gridLayout->getItemPosition(buttonIndex, &row, &column, &rowSpan, &columnSpan);
-
-                if (column > 0) {
-                    gridLayout->addWidget(gSendAngleStatusLabel, row, column - 1, rowSpan, 1);
-                } else {
-                    // 如果按钮已经在第 0 列，就放在按钮右边，避免覆盖。
-                    gridLayout->addWidget(gSendAngleStatusLabel, row, column + columnSpan, rowSpan, 1);
-                }
-            } else {
-                gridLayout->addWidget(gSendAngleStatusLabel, gridLayout->rowCount(), 0, 1, 1);
-            }
-        } else {
-            // Fallback for this absolute-positioned UI: place it to the left of Send Angle.
-            const QRect buttonRect = ui->sendAngleButton->geometry();
-            const int labelWidth = 120;
-            const int labelHeight = 32;
-            int x = buttonRect.left() - labelWidth - 14;
-            int y = buttonRect.top() + (buttonRect.height() - labelHeight) / 2;
-
-            if (x < 0) {
-                x = buttonRect.right() + 14;
-            }
-
-            if (y < 0) {
-                y = buttonRect.top();
-            }
-
-            gSendAngleStatusLabel->setGeometry(x, y, labelWidth, labelHeight);
-            gSendAngleStatusLabel->show();
-        }
-    } else {
-        gSendAngleStatusLabel->setAlignment(Qt::AlignCenter);
-        gSendAngleStatusLabel->setMinimumSize(110, 28);
-        gSendAngleStatusLabel->setStyleSheet(SEND_ANGLE_STATUS_IDLE_STYLE);
+    } else if (gSendAngleStatusLabel->parentWidget() != statusParent) {
+        gSendAngleStatusLabel->setParent(statusParent);
     }
+
+    gSendAngleStatusLabel->setAlignment(Qt::AlignCenter);
+    gSendAngleStatusLabel->setMinimumSize(170, 48);
+    gSendAngleStatusLabel->setStyleSheet(SEND_ANGLE_STATUS_IDLE_STYLE);
+
+    const QRect logRect = ui->textBrowserLog->geometry();
+    const int labelWidth = 190;
+    const int labelHeight = 58;
+    const int gap = 18;
+
+    int x = logRect.right() + gap;
+    int y = logRect.top() + (logRect.height() - labelHeight) / 2;
+
+    // 如果窗口太窄导致右边放不下，就退到日志框下方，保证能看见。
+    if (statusParent->width() > 0 && x + labelWidth > statusParent->width()) {
+        x = logRect.left();
+        y = logRect.bottom() + 10;
+    }
+
+    if (y < 0) {
+        y = logRect.top();
+    }
+
+    gSendAngleStatusLabel->setGeometry(x, y, labelWidth, labelHeight);
+    gSendAngleStatusLabel->show();
+    gSendAngleStatusLabel->raise();
 }
 
 void setEstopButtonState(bool active)
@@ -523,6 +524,69 @@ void setupEstopButton(Ui::MainWindow *ui, QWidget *parent)
     setEstopButtonState(gEstopActive);
 }
 
+void setupRestartEsp32Button(Ui::MainWindow *ui, QWidget *parent)
+{
+    if (parent == nullptr || ui == nullptr || gEstopButton == nullptr) {
+        return;
+    }
+
+    gRestartEsp32Button = parent->findChild<QPushButton *>("restartEsp32Button");
+
+    if (gRestartEsp32Button == nullptr) {
+        gRestartEsp32Button = new QPushButton("Restart ESP32", parent);
+        gRestartEsp32Button->setObjectName("restartEsp32Button");
+        gRestartEsp32Button->setMinimumHeight(48);
+        gRestartEsp32Button->setStyleSheet(RESTART_ESP32_BUTTON_STYLE);
+        gRestartEsp32Button->setToolTip("Restart ESP32 by sending ESTOP_REBOOT. The ESP32 will reboot with ESTOP latched until UNLOCK ESTOP is pressed.");
+
+        QLayout *layout = parent->layout();
+
+        if (QBoxLayout *boxLayout = qobject_cast<QBoxLayout *>(layout)) {
+            int estopIndex = boxLayout->indexOf(gEstopButton);
+            if (estopIndex < 0) {
+                estopIndex = boxLayout->count() - 1;
+            }
+            boxLayout->insertWidget(estopIndex + 1, gRestartEsp32Button);
+        } else if (QGridLayout *gridLayout = qobject_cast<QGridLayout *>(layout)) {
+            int row = 0;
+            int column = 0;
+            int rowSpan = 1;
+            int columnSpan = 1;
+
+            int estopIndex = gridLayout->indexOf(gEstopButton);
+            if (estopIndex >= 0) {
+                gridLayout->getItemPosition(estopIndex, &row, &column, &rowSpan, &columnSpan);
+                gridLayout->addWidget(gRestartEsp32Button, row, column + columnSpan, rowSpan, 1);
+            } else {
+                gridLayout->addWidget(gRestartEsp32Button, gridLayout->rowCount(), 2, 1, 1);
+            }
+        } else {
+            // Fallback for this absolute-positioned UI: place it on the right side of ESTOP.
+            const QRect estopRect = gEstopButton->geometry();
+            const int buttonWidth = 250;
+            const int buttonHeight = estopRect.height() > 0 ? estopRect.height() : 58;
+            const int gap = 100;
+
+            int x = estopRect.right() + gap;
+            int y = estopRect.top();
+
+            // 如果当前窗口右侧空间不够，就仍然尽量靠右显示，不覆盖 ESTOP。
+            // if (parent->width() > 0 && x + buttonWidth > parent->width()) {
+            //     x = estopRect.left();
+            //     y = estopRect.bottom() + 10;
+            // }
+
+            gRestartEsp32Button->setGeometry(x, y, buttonWidth, buttonHeight);
+            gRestartEsp32Button->show();
+        }
+    } else {
+        gRestartEsp32Button->setText("Restart ESP32");
+        gRestartEsp32Button->setMinimumHeight(48);
+        gRestartEsp32Button->setStyleSheet(RESTART_ESP32_BUTTON_STYLE);
+        gRestartEsp32Button->setToolTip("Restart ESP32 by sending ESTOP_REBOOT. The ESP32 will reboot with ESTOP latched until UNLOCK ESTOP is pressed.");
+    }
+}
+
 void setSendAngleIdle(Ui::MainWindow *ui)
 {
     ui->sendAngleButton->setEnabled(true);
@@ -612,6 +676,7 @@ void setupAngleModeCombo(Ui::MainWindow *ui)
 
     setupSendAngleStatusLabel(ui, parent);
     setupEstopButton(ui, parent);
+    setupRestartEsp32Button(ui, parent);
 
     // If you later add a combo box with objectName=angleModeCombo in Qt Designer,
     // this code will reuse it and will not create a duplicate.
@@ -818,6 +883,37 @@ MainWindow::MainWindow(QWidget *parent)
                 addLog("Emergency stop command sent");
             } else {
                 addLog("Emergency stop send failed");
+            }
+        });
+    }
+
+    if (gRestartEsp32Button != nullptr) {
+        connect(gRestartEsp32Button, &QPushButton::clicked, this, [=]() {
+            if (socket->state() != QAbstractSocket::ConnectedState) {
+                setSendAngleStatusFailed();
+                addLog("Not connected, restart command not sent");
+                return;
+            }
+
+            // 重启前停止上位机继续发 back-and-forth，真正重启由 ESP32 执行。
+            gMotorMoving = false;
+            gAngleSequenceRunning = false;
+            gAngleSequenceStopRequested = false;
+            gBackAndForthBaseAngle = 0.0;
+            gBackAndForthSentCount = 0;
+            setSendAngleIdle(ui);
+            setSendAngleStatusIdle("Restarting");
+
+            // 当前 ESP32 固件里的重启命令是 ESTOP_REBOOT：先急停、清队列，然后重启。
+            // 重启后 ESP32 会保持 ESTOP latch，需要重新连接后按 UNLOCK ESTOP。
+            sendCommand("ESTOP_REBOOT", true);
+
+            if (gLastCommandWriteOk) {
+                setEstopButtonState(true);
+                addLog("Restart ESP32 command sent. After reconnect, press UNLOCK ESTOP if it is latched.");
+            } else {
+                setSendAngleStatusFailed();
+                addLog("Restart ESP32 send failed");
             }
         });
     }
