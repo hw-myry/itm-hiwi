@@ -75,10 +75,16 @@ const float ANGLE_LIMIT_EPS = 0.01f;
 // =====================================================
 // LED
 // =====================================================
+// GPIO38 现在接到 A4988 EN 引脚，不能再同时作为 NeoPixel LED 引脚使用。
+// 如果以后把 LED 换到其他 GPIO，可以把 USE_NEOPIXEL_LED 改成 1 并修改 LED_PIN。
+#define USE_NEOPIXEL_LED 0
 #define LED_PIN 38
 #define LED_COUNT 1
 
+#if USE_NEOPIXEL_LED == 1
 Adafruit_NeoPixel pixels(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+#endif
+
 bool ledEnabled = false;
 
 // =====================================================
@@ -86,6 +92,11 @@ bool ledEnabled = false;
 // =====================================================
 #define STEP_PIN 39
 #define DIR_PIN 40
+
+// A4988 EN / ENABLE 引脚：LOW = 使能输出，HIGH = 禁止输出。
+// 你已经把 GPIO38 接到了 A4988 EN，所以急停时直接把 GPIO38 拉高。
+#define EN_PIN 38
+#define A4988_ENABLE_ACTIVE_LOW 1
 
 #define ENCODE_CLK 5
 #define ENCODE_DT 6
@@ -224,12 +235,88 @@ float motionResidualAngle = 0.0f;
 volatile long encoderCount = 0;
 volatile int lastCLK = 0;
 
+// 急停标志：true 表示已经拉高 A4988 EN，电机驱动输出被禁止。
+// volatile 让 Core0 的 WiFi/Serial task 和 Core1 的电机 task 都能及时看到变化。
+volatile bool emergencyStopActive = false;
+
+// 软件重启后保持急停锁定。
+// ESTOP / ESTOP_REBOOT 会把它设为 true；ESTOP_CLEAR 才会解除。
+// RTC_DATA_ATTR 可以跨 ESP.restart() 保留，但断电后会丢失。
+RTC_DATA_ATTR bool estopLatchedAfterRestart = false;
+
 // =====================================================
 // LED Functions
 // =====================================================
 void setColor(int r, int g, int b) {
+#if USE_NEOPIXEL_LED == 1
   pixels.setPixelColor(0, pixels.Color(r, g, b));
   pixels.show();
+#else
+  (void)r;
+  (void)g;
+  (void)b;
+#endif
+}
+
+// =====================================================
+// Emergency Stop / A4988 Enable Functions
+// =====================================================
+void motorDriverEnable(bool enable) {
+#if A4988_ENABLE_ACTIVE_LOW == 1
+  digitalWrite(EN_PIN, enable ? LOW : HIGH);
+#else
+  digitalWrite(EN_PIN, enable ? HIGH : LOW);
+#endif
+}
+
+void motorDriverDisable() {
+  motorDriverEnable(false);
+  digitalWrite(STEP_PIN, LOW);
+}
+
+void emergencyStopNow() {
+  emergencyStopActive = true;
+  estopLatchedAfterRestart = true;
+
+  // 先禁止 A4988 输出，再清 STEP，尽量做到最快停止。
+  motorDriverDisable();
+
+  // 清掉还没执行的运动命令，避免解除急停后继续执行旧队列。
+  if (targetQueue != NULL) {
+    xQueueReset(targetQueue);
+  }
+
+  Serial.println("EMERGENCY STOP: A4988 disabled, latched, and motion queue cleared");
+}
+
+void clearEmergencyStop() {
+  emergencyStopActive = false;
+  estopLatchedAfterRestart = false;
+  motorDriverEnable(true);
+  Serial.println("Emergency stop cleared: A4988 enabled");
+}
+
+void estopRebootTask(void* pvParameters) {
+  (void)pvParameters;
+
+  // 给 TCP/Serial 回包一点时间发出去。
+  vTaskDelay(pdMS_TO_TICKS(250));
+
+  Serial.println("ESTOP_REBOOT: restarting now, ESTOP latch will stay ON after reboot");
+  Serial.flush();
+  ESP.restart();
+}
+
+void scheduleEmergencyReboot() {
+  xTaskCreatePinnedToCore(
+    estopRebootTask,
+    "ESTOP Reboot",
+    2048,
+    NULL,
+    3,
+    NULL,
+    0
+  );
 }
 
 // =====================================================
@@ -357,6 +444,14 @@ String getCurrentAngleString() {
          " LAST_DIR=" + getDirectionName(lastMoveDir);
 }
 
+String getEmergencyStopString() {
+  return "ESTOP=" + String(emergencyStopActive ? "ON" : "OFF") +
+         " LATCH=" + String(estopLatchedAfterRestart ? "ON" : "OFF") +
+         " EN_PIN=" + String(EN_PIN) +
+         " DRIVER=" + String(emergencyStopActive ? "DISABLED" : "ENABLED") +
+         " CURRENT=" + String(getRealAngleTotal(), 2);
+}
+
 bool isAngleLimitEnabled() {
   return maxAbsAngleLimit > ANGLE_LIMIT_EPS;
 }
@@ -479,6 +574,8 @@ String getConfigString() {
          " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
          " BACKLASH=" + String(backlashCompAngle, 2) +
          " ANGLE_LIMIT=" + String(maxAbsAngleLimit, 2) +
+         " ESTOP=" + String(emergencyStopActive ? "ON" : "OFF") +
+         " EN_PIN=" + String(EN_PIN) +
          " LAST_DIR=" + getDirectionName(lastMoveDir) +
          " RESIDUAL=" + String(motionResidualAngle, 2);
 }
@@ -619,6 +716,8 @@ String getHomeString() {
          " HOME_BACK=" + String(getAutoHomeMoveAngle(), 2) +
          " BACKLASH=" + String(backlashCompAngle, 2) +
          " ANGLE_LIMIT=" + String(maxAbsAngleLimit, 2) +
+         " ESTOP=" + String(emergencyStopActive ? "ON" : "OFF") +
+         " EN_PIN=" + String(EN_PIN) +
          " LAST_DIR=" + getDirectionName(lastMoveDir) +
          " RESIDUAL=" + String(motionResidualAngle, 2) +
          " ENCODER=" + String(getEncoderCount()) +
@@ -667,6 +766,11 @@ void clearSavedHomeOffset(bool alsoResetEncoder) {
 // Motor Step Functions
 // =====================================================
 void oneStepWithDelay(bool dir, uint32_t halfPeriodUs) {
+  if (emergencyStopActive) {
+    digitalWrite(STEP_PIN, LOW);
+    return;
+  }
+
 #if MOTOR_DIR_INVERT == 1
   dir = !dir;
 #endif
@@ -682,6 +786,10 @@ void oneStepWithDelay(bool dir, uint32_t halfPeriodUs) {
 }
 
 long openLoopRotateAngle(float angle, float rotateSpeedHz) {
+  if (emergencyStopActive) {
+    return 0;
+  }
+
   int dirSign = getMoveDirection(angle);
 
   if (dirSign == 0) {
@@ -714,6 +822,10 @@ long openLoopRotateAngle(float angle, float rotateSpeedHz) {
   unsigned long lastYieldMs = millis();
 
   for (long i = 0; i < steps; i++) {
+    if (emergencyStopActive) {
+      break;
+    }
+
     oneStepWithDelay(dir, halfPeriodUs);
 
     unsigned long nowMs = millis();
@@ -797,22 +909,61 @@ String handleCommand(String cmd) {
   cmd.trim();
 
   // =====================================================
+  // Emergency Stop / A4988 Enable
+  // =====================================================
+  if (cmd == "ESTOP" || cmd == "STOP" || cmd == "EMERGENCY_STOP") {
+    emergencyStopNow();
+    return "OK ESTOP " + getEmergencyStopString();
+  }
+
+  if (cmd == "ESTOP_REBOOT" || cmd == "STOP_REBOOT" || cmd == "EMERGENCY_REBOOT") {
+    emergencyStopNow();
+    scheduleEmergencyReboot();
+    return "OK ESTOP_REBOOT " + getEmergencyStopString() + " REBOOTING=YES";
+  }
+
+  if (cmd == "ESTOP_CLEAR" || cmd == "STOP_CLEAR" || cmd == "MOTOR_ENABLE") {
+    clearEmergencyStop();
+    return "OK ESTOP_CLEAR " + getEmergencyStopString();
+  }
+
+  if (cmd == "MOTOR_DISABLE") {
+    emergencyStopNow();
+    return "OK MOTOR_DISABLE " + getEmergencyStopString();
+  }
+
+  if (cmd == "ESTOP?" || cmd == "STOP?" || cmd == "MOTOR_ENABLE?") {
+    return getEmergencyStopString();
+  }
+
+  // =====================================================
   // LED
   // =====================================================
   if (cmd == "LED_ON") {
+#if USE_NEOPIXEL_LED == 1
     ledEnabled = true;
     setColor(255, 255, 255);
     return "OK LED_ON";
+#else
+    ledEnabled = false;
+    return "ERR LED DISABLED GPIO38_USED_BY_A4988_EN";
+#endif
   }
 
   if (cmd == "LED_OFF") {
     ledEnabled = false;
+#if USE_NEOPIXEL_LED == 1
     pixels.clear();
     pixels.show();
+#endif
     return "OK LED_OFF";
   }
 
   if (cmd.startsWith("RGB:")) {
+#if USE_NEOPIXEL_LED != 1
+    return "ERR LED DISABLED GPIO38_USED_BY_A4988_EN";
+#endif
+
     if (!ledEnabled) {
       return "LED IS OFF";
     }
@@ -1233,6 +1384,15 @@ String handleCommand(String cmd) {
   }
 
   // =====================================================
+  // 急停锁定时，不接收任何运动角度命令。
+  // ANGLE? / CURRENT? 查询仍然允许，方便上位机显示当前位置。
+  // =====================================================
+  if (emergencyStopActive &&
+      (cmd.startsWith("ANGLE:") || isValidNumber(cmd))) {
+    return "ERR ESTOP_ACTIVE ANGLE_REJECTED USE ESTOP_CLEAR " + getEmergencyStopString();
+  }
+
+  // =====================================================
   // 支持 ANGLE:90
   // =====================================================
   if (cmd.startsWith("ANGLE:")) {
@@ -1366,6 +1526,21 @@ void closedLoopTask(void* pvParameters) {
 
   while (true) {
     if (xQueueReceive(targetQueue, &moveCmd, portMAX_DELAY)) {
+
+      if (emergencyStopActive) {
+        String estopMsg =
+          String("MOTOR_DONE STATUS=ESTOP") +
+          " REQUEST=" + String(moveCmd.angle, 2) +
+          " FINAL=" + String(getRealAngleTotal(), 2) +
+          " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
+          " ESTOP=ON";
+        Serial.println(estopMsg);
+        enqueueUpperNotify(estopMsg);
+        continue;
+      }
+
+      // 正常运动开始前确保 A4988 处于使能状态。
+      motorDriverEnable(true);
 
       // requestedAngle 是用户/自动回零请求的逻辑角度。
       // moveAngle 是实际送给 PID 执行的角度，可能已经加了反向间隙补偿。
@@ -1501,6 +1676,17 @@ void closedLoopTask(void* pvParameters) {
       float postCorrectErrorAfter = 0.0f;
 
       while (true) {
+        if (emergencyStopActive) {
+          motorDriverDisable();
+          arrived = false;
+          stopReason = "ESTOP";
+          finalAngle = getRealAngleTotal();
+          Serial.print("Emergency stop during move | Final: ");
+          Serial.print(finalAngle, 2);
+          Serial.println(" deg");
+          break;
+        }
+
         float currentAngle = getRealAngleTotal();
         finalAngle = currentAngle;
 
@@ -1661,11 +1847,16 @@ void closedLoopTask(void* pvParameters) {
 
 #if POST_CORRECT_ENABLE == 1
       bool canPostCorrect =
+        !emergencyStopActive &&
         fabs(postCorrectErrorBefore) > POST_CORRECT_TOLERANCE &&
         fabs(postCorrectErrorBefore) <= POST_CORRECT_MAX_ANGLE;
 
       if (canPostCorrect) {
         for (int round = 0; round < POST_CORRECT_MAX_ROUNDS; round++) {
+          if (emergencyStopActive) {
+            break;
+          }
+
           float correctionError = targetAngle - getRealAngleTotal();
 
           if (fabs(correctionError) <= POST_CORRECT_TOLERANCE) {
@@ -1743,7 +1934,7 @@ void closedLoopTask(void* pvParameters) {
         }
       }
 
-      if (moveCmd.savePosition) {
+      if (moveCmd.savePosition && stopReason != "ESTOP") {
 
         if (moveCmd.zeroAfterMove && arrived) {
           // 自动回零完成：Flash 归零，编码器计数也归零
@@ -1780,6 +1971,10 @@ void closedLoopTask(void* pvParameters) {
           Serial.println(getDirectionName(lastMoveDir));
         }
       } else {
+        if (stopReason == "ESTOP") {
+          Serial.println("Emergency stop: Flash HOME_POS not updated. Re-sync with ZERO or HOME:<angle> if needed.");
+        }
+
         // 关闭 Flash 找零时，也要继续记录上一次方向，保证反向间隙补偿仍然生效。
         if (!moveCmd.zeroAfterMove && currentMoveDir != 0 && arrived) {
           lastMoveDir = currentMoveDir;
@@ -1805,6 +2000,8 @@ void closedLoopTask(void* pvParameters) {
         " RESIDUAL=" + String(motionResidualAngle, 2) +
         " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
         " ANGLE_LIMIT=" + String(maxAbsAngleLimit, 2) +
+        " ESTOP=" + String(emergencyStopActive ? "ON" : "OFF") +
+        " DRIVER=" + String(emergencyStopActive ? "DISABLED" : "ENABLED") +
         " LAST_DIR=" + getDirectionName(lastMoveDir);
 
       enqueueUpperNotify(doneMsg);
@@ -1844,6 +2041,12 @@ void statusTask(void* pvParameters) {
     Serial.print(" | Residual: ");
     Serial.print(motionResidualAngle);
 
+    Serial.print(" | ESTOP: ");
+    Serial.print(emergencyStopActive ? "ON" : "OFF");
+
+    Serial.print(" | EN_PIN: ");
+    Serial.print(EN_PIN);
+
     Serial.print(" | SW: ");
     Serial.println(swState == LOW ? "PRESSED" : "RELEASED");
 
@@ -1864,14 +2067,22 @@ void setup() {
   loadConfigFromFlash();
 
   // LED
+#if USE_NEOPIXEL_LED == 1
   pixels.begin();
   pixels.setBrightness(80);
   pixels.clear();
   pixels.show();
+#else
+  Serial.println("NeoPixel LED disabled because GPIO38 is used as A4988 EN");
+#endif
 
   // Motor
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIR_PIN, OUTPUT);
+  pinMode(EN_PIN, OUTPUT);
+
+  // 默认先禁止驱动输出，等初始化完成后再使能，避免开机瞬间乱动。
+  motorDriverDisable();
 
   digitalWrite(STEP_PIN, LOW);
   digitalWrite(DIR_PIN, LOW);
@@ -1892,6 +2103,16 @@ void setup() {
     while (true) {
       delay(1000);
     }
+  }
+
+  if (estopLatchedAfterRestart) {
+    emergencyStopActive = true;
+    motorDriverDisable();
+    Serial.println("Boot in ESTOP latched state: A4988 stays disabled. Use ESTOP_CLEAR to unlock.");
+  } else {
+    emergencyStopActive = false;
+    motorDriverEnable(true);
+    Serial.println("A4988 enabled on GPIO38. ESTOP command will pull EN high.");
   }
 
   // Network
@@ -1946,24 +2167,29 @@ void setup() {
   );
 
 #if ENABLE_AUTO_HOME_FLASH == 1
-  // 开机自动回零：如果 Flash 里保存了当前位置，就直接往 HOME_POS 的反方向回零
-  float autoHomeAngle = getAutoHomeMoveAngle();
-
-  if (fabs(autoHomeAngle) > AUTO_HOME_MIN_ANGLE) {
-    MotorMoveCommand homeCmd;
-    homeCmd.angle = autoHomeAngle;
-    homeCmd.zeroAfterMove = true;
-    homeCmd.savePosition = true;
-
-    xQueueSend(targetQueue, &homeCmd, portMAX_DELAY);
-
-    Serial.print("Auto home queued. Saved position: " );
-    Serial.print(savedHomeOffsetAngle, 2);
-    Serial.print(" deg | Move back: " );
-    Serial.print(homeCmd.angle, 2);
-    Serial.println(" deg");
+  // 开机自动回零：如果 Flash 里保存了当前位置，就直接往 HOME_POS 的反方向回零。
+  // 但 ESTOP_REBOOT 后会保持急停锁定，此时绝对不能自动回零。
+  if (emergencyStopActive) {
+    Serial.println("Auto home skipped because ESTOP is active. Use ESTOP_CLEAR to unlock first.");
   } else {
-    Serial.println("Auto home skipped: saved position is 0");
+    float autoHomeAngle = getAutoHomeMoveAngle();
+
+    if (fabs(autoHomeAngle) > AUTO_HOME_MIN_ANGLE) {
+      MotorMoveCommand homeCmd;
+      homeCmd.angle = autoHomeAngle;
+      homeCmd.zeroAfterMove = true;
+      homeCmd.savePosition = true;
+
+      xQueueSend(targetQueue, &homeCmd, portMAX_DELAY);
+
+      Serial.print("Auto home queued. Saved position: " );
+      Serial.print(savedHomeOffsetAngle, 2);
+      Serial.print(" deg | Move back: " );
+      Serial.print(homeCmd.angle, 2);
+      Serial.println(" deg");
+    } else {
+      Serial.println("Auto home skipped: saved position is 0");
+    }
   }
 #else
   Serial.println("Auto home disabled: ENABLE_AUTO_HOME_FLASH=0");
@@ -1981,7 +2207,7 @@ void setup() {
 
   Serial.println("Input angle via Serial or WiFi, e.g. 90 / -180 / ANGLE:45");
   Serial.println("EC11 fixed: 1 count = 4.5 deg, output angle = EC11 angle * 2");
-  Serial.println("v4: ANGLE_LIMIT added, fast defaults: SPEED=1500 step/s, MIN_SPEED=500 step/s");
+  Serial.println("v6: ESTOP_REBOOT + ESTOP angle lock added, GPIO38 A4988 EN, ANGLE_LIMIT retained");
   Serial.println("Config commands: CFG? / CFG_SAVE / CFG_RESET / PID? / SPEED? / MINSPEED? / ENCODER? / TOL? / BACKLASH? / LIMIT?");
   Serial.println("Angle commands: ANGLE? / CURRENT? / CURRENT:90 / ANGLE_SET:90 / CURRENT_SYNC_HOME");
   Serial.println("Home commands: HOME? / POS? / HOME_ZERO / ZERO / HOME:60");
@@ -1989,6 +2215,7 @@ void setup() {
   Serial.println("Backlash commands: BACKLASH? / BACKLASH:5, use CFG_SAVE to persist");
   Serial.println("Angle limit commands: LIMIT? / LIMIT:60 / ANGLE_LIMIT:60, 0 means OFF, use CFG_SAVE to persist");
   Serial.println("Residual commands: RESIDUAL? / RESIDUAL_ZERO");
+  Serial.println("Emergency stop commands: ESTOP / STOP / ESTOP_REBOOT / STOP_REBOOT / ESTOP_CLEAR / STOP_CLEAR / ESTOP?");
 }
 
 // =====================================================

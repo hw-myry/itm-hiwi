@@ -12,6 +12,8 @@
 #include <QBoxLayout>
 #include <QGridLayout>
 #include <QPushButton>
+#include <QLineEdit>
+#include <QFormLayout>
 #include <QByteArray>
 #include <QStringList>
 
@@ -44,11 +46,15 @@ QComboBox *gAngleModeCombo = nullptr;
 QLabel *gAngleModeLabel = nullptr;
 QPushButton *gResetAngleButton = nullptr;
 QLabel *gSendAngleStatusLabel = nullptr;
+QPushButton *gEstopButton = nullptr;
+QLineEdit *gAbsAngleLimitEdit = nullptr;
+QLabel *gAbsAngleLimitLabel = nullptr;
+bool gEstopActive = false;
 
 // sendCommand 会在这里记录最近一次 TCP 写入是否成功，供 Send Angle 状态显示使用。
 bool gLastCommandWriteOk = false;
 
-// Save Parameter 状态机：不要一次性把 PID/SPEED/CFG_SAVE 全部塞进 TCP。
+// Save Parameter 状态机：不要一次性把 PID/SPEED/ANGLE_LIMIT/CFG_SAVE 全部塞进 TCP。
 // 每收到 ESP32 对上一条命令的 OK 回复后，再发送下一条命令。
 bool gSaveParameterRunning = false;
 QStringList gSaveParameterCommands;
@@ -134,6 +140,38 @@ const char *RESET_ANGLE_BUTTON_STYLE =
     " background-color: #bdc3c7;"
     " color: white;"
     " font-weight: bold;"
+    "}";
+
+const char *ESTOP_BUTTON_STYLE =
+    "QPushButton {"
+    " background-color: #e53935;"
+    " color: white;"
+    " font-weight: bold;"
+    " font-size: 20px;"
+    " border-radius: 6px;"
+    " padding: 8px 16px;"
+    "}"
+    "QPushButton:hover {"
+    " background-color: #c62828;"
+    "}"
+    "QPushButton:pressed {"
+    " background-color: #b71c1c;"
+    "}";
+
+const char *ESTOP_UNLOCK_BUTTON_STYLE =
+    "QPushButton {"
+    " background-color: #43a047;"
+    " color: white;"
+    " font-weight: bold;"
+    " font-size: 18px;"
+    " border-radius: 6px;"
+    " padding: 8px 16px;"
+    "}"
+    "QPushButton:hover {"
+    " background-color: #2e7d32;"
+    "}"
+    "QPushButton:pressed {"
+    " background-color: #1b5e20;"
     "}";
 
 const char *SEND_ANGLE_STATUS_IDLE_STYLE =
@@ -251,7 +289,7 @@ void setupSendAngleStatusLabel(Ui::MainWindow *ui, QWidget *parent)
         gSendAngleStatusLabel = new QLabel("", parent);
         gSendAngleStatusLabel->setObjectName("sendAngleStatusLabel");
         gSendAngleStatusLabel->setAlignment(Qt::AlignCenter);
-        gSendAngleStatusLabel->setMinimumHeight(28);
+        gSendAngleStatusLabel->setMinimumSize(110, 28);
         gSendAngleStatusLabel->setStyleSheet(SEND_ANGLE_STATUS_IDLE_STYLE);
 
         QLayout *layout = parent->layout();
@@ -262,7 +300,7 @@ void setupSendAngleStatusLabel(Ui::MainWindow *ui, QWidget *parent)
                 buttonIndex = boxLayout->count();
             }
 
-            // 放在 Send Angle 按钮正上方。
+            // 放在 Send Angle 按钮左边。
             boxLayout->insertWidget(buttonIndex, gSendAngleStatusLabel);
         } else if (QGridLayout *gridLayout = qobject_cast<QGridLayout *>(layout)) {
             int row = 0;
@@ -273,30 +311,216 @@ void setupSendAngleStatusLabel(Ui::MainWindow *ui, QWidget *parent)
             int buttonIndex = gridLayout->indexOf(ui->sendAngleButton);
             if (buttonIndex >= 0) {
                 gridLayout->getItemPosition(buttonIndex, &row, &column, &rowSpan, &columnSpan);
-                int statusRow = row > 0 ? row - 1 : row + 1;
-                gridLayout->addWidget(gSendAngleStatusLabel, statusRow, column, 1, columnSpan);
+
+                if (column > 0) {
+                    gridLayout->addWidget(gSendAngleStatusLabel, row, column - 1, rowSpan, 1);
+                } else {
+                    // 如果按钮已经在第 0 列，就放在按钮右边，避免覆盖。
+                    gridLayout->addWidget(gSendAngleStatusLabel, row, column + columnSpan, rowSpan, 1);
+                }
             } else {
-                gridLayout->addWidget(gSendAngleStatusLabel, gridLayout->rowCount(), 0, 1, 2);
+                gridLayout->addWidget(gSendAngleStatusLabel, gridLayout->rowCount(), 0, 1, 1);
             }
         } else {
-            // Fallback for this absolute-positioned UI: place it just above Send Angle.
+            // Fallback for this absolute-positioned UI: place it to the left of Send Angle.
             const QRect buttonRect = ui->sendAngleButton->geometry();
-            const int labelHeight = 30;
-            int x = buttonRect.left();
-            int y = buttonRect.top() - labelHeight - 8;
+            const int labelWidth = 120;
+            const int labelHeight = 32;
+            int x = buttonRect.left() - labelWidth - 14;
+            int y = buttonRect.top() + (buttonRect.height() - labelHeight) / 2;
 
-            if (y < 0) {
-                y = buttonRect.bottom() + 8;
+            if (x < 0) {
+                x = buttonRect.right() + 14;
             }
 
-            gSendAngleStatusLabel->setGeometry(x, y, buttonRect.width(), labelHeight);
+            if (y < 0) {
+                y = buttonRect.top();
+            }
+
+            gSendAngleStatusLabel->setGeometry(x, y, labelWidth, labelHeight);
             gSendAngleStatusLabel->show();
         }
     } else {
         gSendAngleStatusLabel->setAlignment(Qt::AlignCenter);
-        gSendAngleStatusLabel->setMinimumHeight(28);
+        gSendAngleStatusLabel->setMinimumSize(110, 28);
         gSendAngleStatusLabel->setStyleSheet(SEND_ANGLE_STATUS_IDLE_STYLE);
     }
+}
+
+void setEstopButtonState(bool active)
+{
+    gEstopActive = active;
+
+    if (gEstopButton == nullptr) {
+        return;
+    }
+
+    if (active) {
+        gEstopButton->setText("UNLOCK ESTOP");
+        gEstopButton->setStyleSheet(ESTOP_UNLOCK_BUTTON_STYLE);
+        gEstopButton->setToolTip("Clear emergency stop: send ESTOP_CLEAR to ESP32 and re-enable the A4988 driver.");
+    } else {
+        gEstopButton->setText("ESTOP");
+        gEstopButton->setStyleSheet(ESTOP_BUTTON_STYLE);
+        gEstopButton->setToolTip("Emergency stop: send ESTOP to ESP32 and disable the A4988 driver immediately.");
+    }
+}
+
+void setupAbsAngleLimitEditor(Ui::MainWindow *ui)
+{
+    if (ui == nullptr || ui->speedEdit == nullptr) {
+        return;
+    }
+
+    QWidget *parent = ui->speedEdit->parentWidget();
+
+    if (parent == nullptr) {
+        return;
+    }
+
+    gAbsAngleLimitEdit = parent->findChild<QLineEdit *>("absAngleLimitEdit");
+    gAbsAngleLimitLabel = parent->findChild<QLabel *>("absAngleLimitLabel");
+
+    if (gAbsAngleLimitLabel == nullptr) {
+        gAbsAngleLimitLabel = new QLabel("Abs Angle Limit:", parent);
+        gAbsAngleLimitLabel->setObjectName("absAngleLimitLabel");
+        gAbsAngleLimitLabel->setToolTip("Maximum allowed absolute Current Angle. 0 disables the angle limit.");
+    }
+
+    if (gAbsAngleLimitEdit == nullptr) {
+        gAbsAngleLimitEdit = new QLineEdit(parent);
+        gAbsAngleLimitEdit->setObjectName("absAngleLimitEdit");
+        gAbsAngleLimitEdit->setText("60");
+        gAbsAngleLimitEdit->setPlaceholderText("0 = OFF, e.g. 60");
+        gAbsAngleLimitEdit->setToolTip("Send ANGLE_LIMIT:<value>. 0 disables the absolute angle limit.");
+
+        QLayout *layout = parent->layout();
+
+        if (QFormLayout *formLayout = qobject_cast<QFormLayout *>(layout)) {
+            int row = -1;
+            QFormLayout::ItemRole role;
+            formLayout->getWidgetPosition(ui->speedEdit, &row, &role);
+
+            if (row >= 0) {
+                formLayout->insertRow(row + 1, gAbsAngleLimitLabel, gAbsAngleLimitEdit);
+            } else {
+                formLayout->addRow(gAbsAngleLimitLabel, gAbsAngleLimitEdit);
+            }
+        } else if (QBoxLayout *boxLayout = qobject_cast<QBoxLayout *>(layout)) {
+            int speedIndex = boxLayout->indexOf(ui->speedEdit);
+            if (speedIndex < 0) {
+                speedIndex = boxLayout->count() - 1;
+            }
+
+            boxLayout->insertWidget(speedIndex + 1, gAbsAngleLimitLabel);
+            boxLayout->insertWidget(speedIndex + 2, gAbsAngleLimitEdit);
+        } else if (QGridLayout *gridLayout = qobject_cast<QGridLayout *>(layout)) {
+            int row = 0;
+            int column = 0;
+            int rowSpan = 1;
+            int columnSpan = 1;
+
+            int speedIndex = gridLayout->indexOf(ui->speedEdit);
+            if (speedIndex >= 0) {
+                gridLayout->getItemPosition(speedIndex, &row, &column, &rowSpan, &columnSpan);
+                gridLayout->addWidget(gAbsAngleLimitLabel, row + rowSpan, column > 0 ? column - 1 : column, 1, 1);
+                gridLayout->addWidget(gAbsAngleLimitEdit, row + rowSpan, column, 1, columnSpan);
+            } else {
+                gridLayout->addWidget(gAbsAngleLimitLabel, gridLayout->rowCount(), 0, 1, 1);
+                gridLayout->addWidget(gAbsAngleLimitEdit, gridLayout->rowCount() - 1, 1, 1, 1);
+            }
+        } else {
+            // Fallback for absolute-positioned UI: place it directly below Speed.
+            const QRect speedRect = ui->speedEdit->geometry();
+            const int gap = 8;
+            const int labelWidth = 130;
+            const int editWidth = speedRect.width() > 80 ? speedRect.width() : 100;
+            const int h = speedRect.height() > 24 ? speedRect.height() : 28;
+            int labelX = speedRect.left() - labelWidth - 10;
+            int editX = speedRect.left();
+            int y = speedRect.bottom() + gap;
+
+            if (labelX < 0) {
+                labelX = speedRect.left();
+                editX = speedRect.left() + labelWidth + 10;
+            }
+
+            gAbsAngleLimitLabel->setGeometry(labelX, y, labelWidth, h);
+            gAbsAngleLimitEdit->setGeometry(editX, y, editWidth, h);
+            gAbsAngleLimitLabel->show();
+            gAbsAngleLimitEdit->show();
+        }
+    } else {
+        if (gAbsAngleLimitEdit->text().trimmed().isEmpty()) {
+            gAbsAngleLimitEdit->setText("60");
+        }
+        gAbsAngleLimitEdit->setPlaceholderText("0 = OFF, e.g. 60");
+        gAbsAngleLimitEdit->setToolTip("Send ANGLE_LIMIT:<value>. 0 disables the absolute angle limit.");
+    }
+}
+
+void setupEstopButton(Ui::MainWindow *ui, QWidget *parent)
+{
+    if (parent == nullptr || ui == nullptr || ui->sendAngleButton == nullptr) {
+        return;
+    }
+
+    gEstopButton = parent->findChild<QPushButton *>("estopButton");
+
+    if (gEstopButton == nullptr) {
+        gEstopButton = new QPushButton("ESTOP", parent);
+        gEstopButton->setObjectName("estopButton");
+        gEstopButton->setMinimumHeight(48);
+        gEstopButton->setStyleSheet(ESTOP_BUTTON_STYLE);
+        gEstopButton->setToolTip("Emergency stop: send ESTOP to ESP32 and disable the A4988 driver immediately.");
+
+        QLayout *layout = parent->layout();
+
+        if (QBoxLayout *boxLayout = qobject_cast<QBoxLayout *>(layout)) {
+            int buttonIndex = boxLayout->indexOf(ui->sendAngleButton);
+            if (buttonIndex < 0) {
+                buttonIndex = boxLayout->count();
+            }
+
+            // 放在 Send Angle 按钮上方；如果布局是横向，仍尽量插到按钮前面。
+            boxLayout->insertWidget(buttonIndex, gEstopButton);
+        } else if (QGridLayout *gridLayout = qobject_cast<QGridLayout *>(layout)) {
+            int row = 0;
+            int column = 0;
+            int rowSpan = 1;
+            int columnSpan = 1;
+
+            int buttonIndex = gridLayout->indexOf(ui->sendAngleButton);
+            if (buttonIndex >= 0) {
+                gridLayout->getItemPosition(buttonIndex, &row, &column, &rowSpan, &columnSpan);
+
+                if (row > 0) {
+                    gridLayout->addWidget(gEstopButton, row - 1, column, 1, columnSpan);
+                } else {
+                    gridLayout->addWidget(gEstopButton, row + rowSpan, column, 1, columnSpan);
+                }
+            } else {
+                gridLayout->addWidget(gEstopButton, gridLayout->rowCount(), 0, 1, 2);
+            }
+        } else {
+            // Fallback for this absolute-positioned UI: place it directly above Send Angle.
+            const QRect buttonRect = ui->sendAngleButton->geometry();
+            const int estopHeight = 58;
+            int x = buttonRect.left();
+            int y = buttonRect.top() - estopHeight - 14;
+
+            if (y < 0) {
+                y = buttonRect.bottom() + 14;
+            }
+
+            gEstopButton->setGeometry(x, y, buttonRect.width(), estopHeight);
+            gEstopButton->show();
+        }
+    } else {
+        gEstopButton->setMinimumHeight(48);
+    }
+
+    setEstopButtonState(gEstopActive);
 }
 
 void setSendAngleIdle(Ui::MainWindow *ui)
@@ -387,6 +611,7 @@ void setupAngleModeCombo(Ui::MainWindow *ui)
     }
 
     setupSendAngleStatusLabel(ui, parent);
+    setupEstopButton(ui, parent);
 
     // If you later add a combo box with objectName=angleModeCombo in Qt Designer,
     // this code will reuse it and will not create a duplicate.
@@ -478,7 +703,7 @@ void setupAngleModeCombo(Ui::MainWindow *ui)
         } else {
             // Fallback for this absolute-positioned UI: place it to the right of Current Angle.
             const QRect angleRect = ui->currentAngleEdit->geometry();
-            const int buttonWidth = 190;
+            const int buttonWidth = 250;
             const int buttonHeight = (angleRect.height() > 36 ? angleRect.height() : 36);
             int x = angleRect.right() + 20;
             int y = angleRect.top();
@@ -545,6 +770,7 @@ MainWindow::MainWindow(QWidget *parent)
     ui->kdEdit->setText("0.0");
 
     ui->speedEdit->setText("500");
+    setupAbsAngleLimitEditor(ui);
 
     // CPR 和 Tolerance 由 ESP32 固件固定/默认处理，上位机不再显示和保存这两个参数。
     hideParameterEditor(findChild<QWidget *>("CPREdit"), QStringList() << "CPR" << "Encoder CPR" << "Encoder");
@@ -554,6 +780,47 @@ MainWindow::MainWindow(QWidget *parent)
 
     // Angle send mode combo box + initial button state
     setupAngleModeCombo(ui);
+
+    if (gEstopButton != nullptr) {
+        connect(gEstopButton, &QPushButton::clicked, this, [=]() {
+            if (socket->state() != QAbstractSocket::ConnectedState) {
+                setSendAngleStatusFailed();
+                addLog(gEstopActive ? "Not connected, ESTOP_CLEAR command not sent"
+                                    : "Not connected, ESTOP command not sent");
+                return;
+            }
+
+            if (gEstopActive) {
+                // 解锁急停：让 ESP32 清除 latch 并重新使能 A4988。
+                sendCommand("ESTOP_CLEAR", true);
+
+                if (gLastCommandWriteOk) {
+                    addLog("Emergency stop clear command sent");
+                } else {
+                    addLog("Emergency stop clear send failed");
+                }
+
+                return;
+            }
+
+            // 上位机立即停止 back-and-forth 的后续发送；真正断使能由 ESP32 收到 ESTOP 后执行。
+            gMotorMoving = false;
+            gAngleSequenceRunning = false;
+            gAngleSequenceStopRequested = false;
+            gBackAndForthBaseAngle = 0.0;
+            gBackAndForthSentCount = 0;
+            setSendAngleIdle(ui);
+            setSendAngleStatusFailed();
+
+            sendCommand("ESTOP", true);
+
+            if (gLastCommandWriteOk) {
+                addLog("Emergency stop command sent");
+            } else {
+                addLog("Emergency stop send failed");
+            }
+        });
+    }
 
     if (gResetAngleButton != nullptr) {
         connect(gResetAngleButton, &QPushButton::clicked, this, [=]() {
@@ -601,6 +868,12 @@ MainWindow::MainWindow(QWidget *parent)
         new QDoubleValidator(1.0, 3000.0, 2, this)
         );
 
+    if (gAbsAngleLimitEdit != nullptr) {
+        gAbsAngleLimitEdit->setValidator(
+            new QDoubleValidator(0.0, 64800.0, 2, this)
+            );
+    }
+
 
     // =====================================================
     // Periodically read current angle
@@ -627,6 +900,7 @@ MainWindow::MainWindow(QWidget *parent)
         // Read current ESP32 config automatically after connection
         QTimer::singleShot(200, this, [=]() {
             sendCommand("CFG?", true);
+            sendCommand("ESTOP?", true);
         });
 
         angleTimer->start();
@@ -649,6 +923,7 @@ MainWindow::MainWindow(QWidget *parent)
         gBackAndForthBaseAngle = 0.0;
         gBackAndForthSentCount = 0;
         setSendAngleIdle(ui);
+        setEstopButtonState(false);
 
         angleTimer->stop();
     });
@@ -766,6 +1041,11 @@ void MainWindow::updateConfigEditsFromLine(const QString &line)
         ui->speedEdit->setText(v);
     }
 
+    v = valueFromLine(line, "ANGLE_LIMIT");
+    if (!v.isEmpty() && gAbsAngleLimitEdit != nullptr) {
+        gAbsAngleLimitEdit->setText(v);
+    }
+
 }
 
 void MainWindow::handleEsp32Line(const QString &line)
@@ -773,8 +1053,9 @@ void MainWindow::handleEsp32Line(const QString &line)
     // Save Parameter 状态机：
     // step 0: 已发 PID，等待 OK PID
     // step 1: 已发 SPEED，等待 OK SPEED
-    // step 2: 已发 CFG_SAVE，等待 OK CFG_SAVE
-    // step 3: 已发 CFG?，等待 CFG 回读
+    // step 2: 已发 ANGLE_LIMIT，等待 OK ANGLE_LIMIT
+    // step 3: 已发 CFG_SAVE，等待 OK CFG_SAVE
+    // step 4: 已发 CFG?，等待 CFG 回读
     if (gSaveParameterRunning) {
         if (line.startsWith("ERR") || line.startsWith("UNKNOWN CMD")) {
             gSaveParameterRunning = false;
@@ -793,11 +1074,14 @@ void MainWindow::handleEsp32Line(const QString &line)
         } else if (gSaveParameterStep == 1 && line.startsWith("OK SPEED")) {
             updateConfigEditsFromLine(line);
             advanceSaveStep = true;
-        } else if (gSaveParameterStep == 2 && line.startsWith("OK CFG_SAVE")) {
+        } else if (gSaveParameterStep == 2 && line.startsWith("OK ANGLE_LIMIT")) {
             updateConfigEditsFromLine(line);
-            addLog("ESP32 confirmed: PID and Speed written to Flash");
             advanceSaveStep = true;
-        } else if (gSaveParameterStep == 3 && line.startsWith("CFG ")) {
+        } else if (gSaveParameterStep == 3 && line.startsWith("OK CFG_SAVE")) {
+            updateConfigEditsFromLine(line);
+            addLog("ESP32 confirmed: PID, Speed and Angle Limit written to Flash");
+            advanceSaveStep = true;
+        } else if (gSaveParameterStep == 4 && line.startsWith("CFG ")) {
             updateConfigEditsFromLine(line);
             gSaveParameterRunning = false;
             gSaveParameterCommands.clear();
@@ -835,6 +1119,36 @@ void MainWindow::handleEsp32Line(const QString &line)
             return;
         }
         // 其他行，比如周期 ANGLE? 回包，继续走普通解析，不影响保存状态机。
+    }
+
+    // ESP32 emergency stop reply.
+    // 注意：OK ESTOP_CLEAR 也以 "OK ESTOP" 开头，所以必须先判断 CLEAR。
+    if (line.startsWith("OK ESTOP_CLEAR") ||
+        line.startsWith("OK STOP_CLEAR") ||
+        line.startsWith("OK MOTOR_ENABLE") ||
+        line.startsWith("ESTOP=OFF")) {
+        setEstopButtonState(false);
+        setSendAngleStatusIdle("ESTOP Cleared");
+        addLog("Emergency stop cleared");
+        return;
+    }
+
+    if (line.startsWith("OK ESTOP ") ||
+        line.startsWith("OK ESTOP_REBOOT") ||
+        line.startsWith("OK STOP ") ||
+        line.startsWith("OK EMERGENCY_STOP") ||
+        line.startsWith("OK MOTOR_DISABLE") ||
+        line.startsWith("ESTOP=ON")) {
+        gMotorMoving = false;
+        gAngleSequenceRunning = false;
+        gAngleSequenceStopRequested = false;
+        gBackAndForthBaseAngle = 0.0;
+        gBackAndForthSentCount = 0;
+        setSendAngleIdle(ui);
+        setSendAngleStatusFailed();
+        setEstopButtonState(true);
+        addLog("Emergency stop active");
+        return;
     }
 
     // ESP32 sends this only after the motor actually stops: MOTOR_DONE STATUS=OK ...
@@ -951,7 +1265,7 @@ void MainWindow::handleEsp32Line(const QString &line)
     // ESP32 confirmed that RAM parameters have been saved to Flash.
     if (line.startsWith("OK CFG_SAVE")) {
         updateConfigEditsFromLine(line);
-        addLog("ESP32 confirmed: PID and Speed saved to Flash");
+        addLog("ESP32 confirmed: PID, Speed and Angle Limit saved to Flash");
         return;
     }
 
@@ -970,6 +1284,12 @@ void MainWindow::handleEsp32Line(const QString &line)
 
     // SPEED=... / OK SPEED=...
     if (line.startsWith("SPEED") || line.startsWith("OK SPEED")) {
+        updateConfigEditsFromLine(line);
+        return;
+    }
+
+    // ANGLE_LIMIT=... / OK ANGLE_LIMIT=...
+    if (line.startsWith("ANGLE_LIMIT") || line.startsWith("OK ANGLE_LIMIT")) {
         updateConfigEditsFromLine(line);
         return;
     }
@@ -1083,6 +1403,12 @@ void MainWindow::on_sendAngleButton_clicked()
         return;
     }
 
+    if (gEstopActive) {
+        setSendAngleStatusFailed();
+        addLog("ESTOP is active. Press UNLOCK ESTOP before sending angle commands.");
+        return;
+    }
+
     QString angleText = ui->angleEdit->text().trimmed();
 
     if (angleText.isEmpty()) {
@@ -1186,8 +1512,9 @@ void MainWindow::on_btnSaveParameter_clicked()
     QString ki = ui->kiEdit->text().trimmed();
     QString kd = ui->kdEdit->text().trimmed();
     QString speed = ui->speedEdit->text().trimmed();
+    QString angleLimit = gAbsAngleLimitEdit != nullptr ? gAbsAngleLimitEdit->text().trimmed() : QString("60");
 
-    if (kp.isEmpty() || ki.isEmpty() || kd.isEmpty() || speed.isEmpty()) {
+    if (kp.isEmpty() || ki.isEmpty() || kd.isEmpty() || speed.isEmpty() || angleLimit.isEmpty()) {
         addLog("Parameter input empty");
         return;
     }
@@ -1196,13 +1523,15 @@ void MainWindow::on_btnSaveParameter_clicked()
     bool okKi = false;
     bool okKd = false;
     bool okSpeed = false;
+    bool okAngleLimit = false;
 
     double kpVal = kp.toDouble(&okKp);
     double kiVal = ki.toDouble(&okKi);
     double kdVal = kd.toDouble(&okKd);
     double speedVal = speed.toDouble(&okSpeed);
+    double angleLimitVal = angleLimit.toDouble(&okAngleLimit);
 
-    if (!okKp || !okKi || !okKd || !okSpeed) {
+    if (!okKp || !okKi || !okKd || !okSpeed || !okAngleLimit) {
         addLog("Parameter format error");
         return;
     }
@@ -1219,9 +1548,15 @@ void MainWindow::on_btnSaveParameter_clicked()
         return;
     }
 
+    if (angleLimitVal < 0 || angleLimitVal > 64800) {
+        addLog("Abs Angle Limit range error. Use 0 to disable, or 0 - 64800 degrees.");
+        return;
+    }
+
     gSaveParameterCommands.clear();
     gSaveParameterCommands << QString("PID:%1,%2,%3").arg(kp).arg(ki).arg(kd)
                            << QString("SPEED:%1").arg(speed)
+                           << QString("ANGLE_LIMIT:%1").arg(angleLimit)
                            << QString("CFG_SAVE")
                            << QString("CFG?");
 
@@ -1230,7 +1565,7 @@ void MainWindow::on_btnSaveParameter_clicked()
     gSaveParameterSequenceId++;
     ui->btnSaveParameter->setEnabled(false);
 
-    addLog("Save started: PID -> SPEED -> CFG_SAVE -> CFG?");
+    addLog("Save started: PID -> SPEED -> ANGLE_LIMIT -> CFG_SAVE -> CFG?");
     sendCommand(gSaveParameterCommands.at(0), true);
 
     const int sequenceId = gSaveParameterSequenceId;
@@ -1240,7 +1575,7 @@ void MainWindow::on_btnSaveParameter_clicked()
             gSaveParameterCommands.clear();
             gSaveParameterStep = 0;
             ui->btnSaveParameter->setEnabled(true);
-            addLog("Save timeout: did not receive expected ESP32 reply. Check ESP32 log for OK PID / OK SPEED / OK CFG_SAVE / CFG");
+            addLog("Save timeout: did not receive expected ESP32 reply. Check ESP32 log for OK PID / OK SPEED / OK ANGLE_LIMIT / OK CFG_SAVE / CFG");
         }
     });
 }
