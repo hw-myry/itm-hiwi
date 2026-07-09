@@ -34,8 +34,8 @@ WiFiServer server(8080);
 // =====================================================
 Preferences prefs;
 
-// 配置版本：v3 用来把旧 Flash 里的慢速参数升级为更快的默认值
-const uint32_t CONFIG_VERSION = 3;
+// 配置版本：v4 增加 ANGLE_LIMIT Flash 参数，同时保留 v3 的速度升级逻辑
+const uint32_t CONFIG_VERSION = 4;
 
 // =====================================================
 // Flash 当前位置 / 反向直接回零参数
@@ -58,6 +58,19 @@ const float POSITION_ZERO_EPS = 0.5f;        // 接近0或整圈时保存成0
 const char* FLASH_KEY_BACKLASH = "backlash";
 const float DEFAULT_BACKLASH_COMP_ANGLE = 5.0f;
 const float DIRECTION_DEADBAND_ANGLE = 0.01f;
+
+// =====================================================
+// 绝对角度限位参数
+// =====================================================
+// maxAbsAngleLimit 表示 Current Angle 允许到达的最大绝对值。
+// 例如 LIMIT=60：
+//   Current=0，命令 60  => 目标 60，允许
+//   Current=60，命令 -130 => 目标 -70，拒绝
+//   Current=30，命令 40 => 目标 70，拒绝
+// 设置为 0 表示关闭限位；修改后用 CFG_SAVE 保存到 Flash。
+const char* FLASH_KEY_MAX_ABS_ANGLE = "maxabs";
+const float DEFAULT_MAX_ABS_ANGLE_LIMIT = 60.0f;
+const float ANGLE_LIMIT_EPS = 0.01f;
 
 // =====================================================
 // LED
@@ -125,6 +138,10 @@ float angleTolerance = DEFAULT_ANGLE_TOLERANCE;
 
 // 反向间隙补偿角度，默认 5 度，可通过 BACKLASH:5 修改，再用 CFG_SAVE 保存
 float backlashCompAngle = DEFAULT_BACKLASH_COMP_ANGLE;
+
+// Current Angle 的绝对值限位，默认 60 度；0 表示关闭限位。
+// 可通过 LIMIT:60 / ANGLE_LIMIT:60 修改，再用 CFG_SAVE 保存。
+float maxAbsAngleLimit = DEFAULT_MAX_ABS_ANGLE_LIMIT;
 
 // 保存到 Flash 的当前位置角度：有符号角度，正数表示在零点正方向，负数表示在零点反方向
 float savedHomeOffsetAngle = 0.0f;
@@ -340,6 +357,33 @@ String getCurrentAngleString() {
          " LAST_DIR=" + getDirectionName(lastMoveDir);
 }
 
+bool isAngleLimitEnabled() {
+  return maxAbsAngleLimit > ANGLE_LIMIT_EPS;
+}
+
+bool isTargetWithinAbsAngleLimit(float targetAngle) {
+  if (!isAngleLimitEnabled()) {
+    return true;
+  }
+
+  return fabs(targetAngle) <= (maxAbsAngleLimit + ANGLE_LIMIT_EPS);
+}
+
+String getAngleLimitString() {
+  return "ANGLE_LIMIT=" + String(maxAbsAngleLimit, 2) +
+         " MODE=" + String(isAngleLimitEnabled() ? "ON" : "OFF") +
+         " CURRENT=" + String(getRealAngleTotal(), 2);
+}
+
+String getAngleLimitRejectString(float currentAngle, float requestedAngle) {
+  float targetAngle = currentAngle + requestedAngle;
+
+  return "ERR ANGLE_LIMIT CURRENT=" + String(currentAngle, 2) +
+         " REQUEST=" + String(requestedAngle, 2) +
+         " TARGET=" + String(targetAngle, 2) +
+         " LIMIT=" + String(maxAbsAngleLimit, 2);
+}
+
 void limitMotionResidual() {
   if (motionResidualAngle > MOTION_RESIDUAL_LIMIT_ANGLE) {
     motionResidualAngle = MOTION_RESIDUAL_LIMIT_ANGLE;
@@ -434,6 +478,7 @@ String getConfigString() {
          " AUTO_HOME_FLASH=" + String(ENABLE_AUTO_HOME_FLASH == 1 ? "ON" : "OFF") +
          " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
          " BACKLASH=" + String(backlashCompAngle, 2) +
+         " ANGLE_LIMIT=" + String(maxAbsAngleLimit, 2) +
          " LAST_DIR=" + getDirectionName(lastMoveDir) +
          " RESIDUAL=" + String(motionResidualAngle, 2);
 }
@@ -453,6 +498,7 @@ void loadConfigFromFlash() {
   encoderCountsPerRev = DEFAULT_ENCODER_COUNTS_PER_REV;
   angleTolerance = prefs.getFloat("tol", DEFAULT_ANGLE_TOLERANCE);
   backlashCompAngle = prefs.getFloat(FLASH_KEY_BACKLASH, DEFAULT_BACKLASH_COMP_ANGLE);
+  maxAbsAngleLimit = prefs.getFloat(FLASH_KEY_MAX_ABS_ANGLE, DEFAULT_MAX_ABS_ANGLE_LIMIT);
 
 #if ENABLE_AUTO_HOME_FLASH == 1
   savedHomeOffsetAngle = prefs.getFloat(FLASH_KEY_HOME_ANGLE, 0.0f);
@@ -475,6 +521,10 @@ void loadConfigFromFlash() {
 
   if (backlashCompAngle < 0.0f || backlashCompAngle > 45.0f) {
     backlashCompAngle = DEFAULT_BACKLASH_COMP_ANGLE;
+  }
+
+  if (maxAbsAngleLimit < 0.0f || maxAbsAngleLimit > 64800.0f) {
+    maxAbsAngleLimit = DEFAULT_MAX_ABS_ANGLE_LIMIT;
   }
 
   // 如果是旧版本保存的配置，自动把速度相关参数升级到 v3 的快速默认值。
@@ -511,6 +561,7 @@ void saveConfigToFlash() {
   prefs.putFloat("cpr", encoderCountsPerRev);
   prefs.putFloat("tol", angleTolerance);
   prefs.putFloat(FLASH_KEY_BACKLASH, backlashCompAngle);
+  prefs.putFloat(FLASH_KEY_MAX_ABS_ANGLE, maxAbsAngleLimit);
 #if ENABLE_AUTO_HOME_FLASH == 1
   prefs.putFloat(FLASH_KEY_HOME_ANGLE, savedHomeOffsetAngle);
 #endif
@@ -531,6 +582,7 @@ void resetConfigToDefault() {
   encoderCountsPerRev = DEFAULT_ENCODER_COUNTS_PER_REV;
   angleTolerance = DEFAULT_ANGLE_TOLERANCE;
   backlashCompAngle = DEFAULT_BACKLASH_COMP_ANGLE;
+  maxAbsAngleLimit = DEFAULT_MAX_ABS_ANGLE_LIMIT;
   savedHomeOffsetAngle = 0.0f;
   lastMoveDir = 0;
   motionResidualAngle = 0.0f;
@@ -566,6 +618,7 @@ String getHomeString() {
          " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
          " HOME_BACK=" + String(getAutoHomeMoveAngle(), 2) +
          " BACKLASH=" + String(backlashCompAngle, 2) +
+         " ANGLE_LIMIT=" + String(maxAbsAngleLimit, 2) +
          " LAST_DIR=" + getDirectionName(lastMoveDir) +
          " RESIDUAL=" + String(motionResidualAngle, 2) +
          " ENCODER=" + String(getEncoderCount()) +
@@ -1033,6 +1086,45 @@ String handleCommand(String cmd) {
   }
 
   // =====================================================
+  // 绝对角度限位查询
+  // =====================================================
+  if (cmd == "LIMIT?" || cmd == "ANGLE_LIMIT?") {
+    return getAngleLimitString();
+  }
+
+  // =====================================================
+  // 绝对角度限位设置
+  // 命令：LIMIT:60 / ANGLE_LIMIT:60
+  // 单位：度；0 表示关闭限位
+  // 只改 RAM，不立刻写 Flash；需要长期保存就再发 CFG_SAVE
+  // =====================================================
+  if (cmd.startsWith("LIMIT:") || cmd.startsWith("ANGLE_LIMIT:")) {
+    String data;
+
+    if (cmd.startsWith("LIMIT:")) {
+      data = cmd.substring(6);
+    } else {
+      data = cmd.substring(12);
+    }
+
+    data.trim();
+
+    if (isValidNumber(data)) {
+      float newLimit = data.toFloat();
+
+      if (newLimit < 0.0f || newLimit > 64800.0f) {
+        return "ERR ANGLE_LIMIT RANGE";
+      }
+
+      maxAbsAngleLimit = newLimit;
+
+      return "OK " + getAngleLimitString();
+    }
+
+    return "ERR ANGLE_LIMIT FORMAT";
+  }
+
+  // =====================================================
   // 当前角度查询
   // =====================================================
   if (cmd == "ANGLE?" || cmd == "CURRENT?") {
@@ -1158,6 +1250,13 @@ String handleCommand(String cmd) {
       return "ERR RANGE";
     }
 
+    float currentAngle = getRealAngleTotal();
+    float logicalTargetAngle = currentAngle + targetAngle;
+
+    if (!isTargetWithinAbsAngleLimit(logicalTargetAngle)) {
+      return getAngleLimitRejectString(currentAngle, targetAngle);
+    }
+
     MotorMoveCommand moveCmd;
     moveCmd.angle = targetAngle;
     moveCmd.zeroAfterMove = false;
@@ -1273,6 +1372,26 @@ void closedLoopTask(void* pvParameters) {
       float requestedAngle = moveCmd.angle;
       int currentMoveDir = getMoveDirection(requestedAngle);
 
+      // 执行前再复查一次限位，防止命令排队期间 Current Angle 已经变化。
+      // 自动回零 zeroAfterMove 不受这个限位阻挡，避免 Flash 回零被卡住。
+      float limitCheckStartAngle = getRealAngleTotal();
+      float logicalTargetAngle = limitCheckStartAngle + requestedAngle;
+
+      if (!moveCmd.zeroAfterMove && !isTargetWithinAbsAngleLimit(logicalTargetAngle)) {
+        String limitMsg =
+          String("MOTOR_DONE STATUS=ANGLE_LIMIT") +
+          " REQUEST=" + String(requestedAngle, 2) +
+          " CURRENT=" + String(limitCheckStartAngle, 2) +
+          " TARGET=" + String(logicalTargetAngle, 2) +
+          " LIMIT=" + String(maxAbsAngleLimit, 2) +
+          " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
+          " LAST_DIR=" + getDirectionName(lastMoveDir);
+
+        Serial.println(limitMsg);
+        enqueueUpperNotify(limitMsg);
+        continue;
+      }
+
       float residualBeforeMove = motionResidualAngle;
       float residualComp = 0.0f;
 
@@ -1293,6 +1412,17 @@ void closedLoopTask(void* pvParameters) {
       float moveAngle = compensatedRequestAngle + backlashComp;
       float startAngle = getRealAngleTotal();
       float targetAngle = startAngle + moveAngle;
+
+      // 如果残差/反向间隙补偿会把实际 PID 目标推出绝对限位，则取消补偿，
+      // 保证最终目标仍在 LIMIT 内。限位判断的核心仍然是 Current + 用户输入。
+      if (!moveCmd.zeroAfterMove && !isTargetWithinAbsAngleLimit(targetAngle)) {
+        residualComp = 0.0f;
+        backlashComp = 0.0f;
+        backlashApplied = false;
+        compensatedRequestAngle = requestedAngle;
+        moveAngle = requestedAngle;
+        targetAngle = startAngle + moveAngle;
+      }
 
       Serial.print("PID Move: ");
       Serial.print(moveAngle);
@@ -1674,6 +1804,7 @@ void closedLoopTask(void* pvParameters) {
         " POST_ERR_AFTER=" + String(postCorrectErrorAfter, 2) +
         " RESIDUAL=" + String(motionResidualAngle, 2) +
         " HOME_POS=" + String(savedHomeOffsetAngle, 2) +
+        " ANGLE_LIMIT=" + String(maxAbsAngleLimit, 2) +
         " LAST_DIR=" + getDirectionName(lastMoveDir);
 
       enqueueUpperNotify(doneMsg);
@@ -1850,12 +1981,13 @@ void setup() {
 
   Serial.println("Input angle via Serial or WiFi, e.g. 90 / -180 / ANGLE:45");
   Serial.println("EC11 fixed: 1 count = 4.5 deg, output angle = EC11 angle * 2");
-  Serial.println("v3 fast defaults: SPEED=1500 step/s, MIN_SPEED=500 step/s");
-  Serial.println("Config commands: CFG? / CFG_SAVE / CFG_RESET / PID? / SPEED? / MINSPEED? / ENCODER? / TOL? / BACKLASH?");
+  Serial.println("v4: ANGLE_LIMIT added, fast defaults: SPEED=1500 step/s, MIN_SPEED=500 step/s");
+  Serial.println("Config commands: CFG? / CFG_SAVE / CFG_RESET / PID? / SPEED? / MINSPEED? / ENCODER? / TOL? / BACKLASH? / LIMIT?");
   Serial.println("Angle commands: ANGLE? / CURRENT? / CURRENT:90 / ANGLE_SET:90 / CURRENT_SYNC_HOME");
   Serial.println("Home commands: HOME? / POS? / HOME_ZERO / ZERO / HOME:60");
   Serial.println("Set ENABLE_AUTO_HOME_FLASH to 1 to enable Flash home, 0 to disable it");
   Serial.println("Backlash commands: BACKLASH? / BACKLASH:5, use CFG_SAVE to persist");
+  Serial.println("Angle limit commands: LIMIT? / LIMIT:60 / ANGLE_LIMIT:60, 0 means OFF, use CFG_SAVE to persist");
   Serial.println("Residual commands: RESIDUAL? / RESIDUAL_ZERO");
 }
 

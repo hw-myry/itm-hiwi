@@ -20,7 +20,8 @@
 // After the host sends ANGLE, it must wait for ESP32 MOTOR_DONE before sending the next angle
 // Angle send mode combo box:
 //   0 = Single angle
-//   1 = Back-and-forth: +A, -A, +A, -A ... infinite loop
+//   1 = Back-and-forth around the start angle:
+//       first move +A, then -2A, +2A, -2A ... infinite loop
 //
 // In back-and-forth mode:
 //   - The button remains clickable and shows "Stop Back-and-Forth"
@@ -42,6 +43,10 @@ int gBackAndForthSentCount = 0;   // Number of back-and-forth move segments alre
 QComboBox *gAngleModeCombo = nullptr;
 QLabel *gAngleModeLabel = nullptr;
 QPushButton *gResetAngleButton = nullptr;
+QLabel *gSendAngleStatusLabel = nullptr;
+
+// sendCommand 会在这里记录最近一次 TCP 写入是否成功，供 Send Angle 状态显示使用。
+bool gLastCommandWriteOk = false;
 
 // Save Parameter 状态机：不要一次性把 PID/SPEED/CFG_SAVE 全部塞进 TCP。
 // 每收到 ESP32 对上一条命令的 OK 回复后，再发送下一条命令。
@@ -131,6 +136,27 @@ const char *RESET_ANGLE_BUTTON_STYLE =
     " font-weight: bold;"
     "}";
 
+const char *SEND_ANGLE_STATUS_IDLE_STYLE =
+    "QLabel {"
+    " color: #7f8c8d;"
+    " font-weight: bold;"
+    " font-size: 18px;"
+    "}";
+
+const char *SEND_ANGLE_STATUS_SUCCESS_STYLE =
+    "QLabel {"
+    " color: #1e88e5;"
+    " font-weight: bold;"
+    " font-size: 20px;"
+    "}";
+
+const char *SEND_ANGLE_STATUS_FAILED_STYLE =
+    "QLabel {"
+    " color: #e74c3c;"
+    " font-weight: bold;"
+    " font-size: 20px;"
+    "}";
+
 int currentAngleSendMode()
 {
     if (gAngleModeCombo == nullptr) {
@@ -162,12 +188,14 @@ QString formatAngleForCommand(double angle)
 
 double nextBackAndForthAngle()
 {
-    // 1st move +A, 2nd move -A, 3rd move +A ... alternating indefinitely.
-    if ((gBackAndForthSentCount % 2) == 0) {
-        return gBackAndForthBaseAngle;
+    // The first segment is the user input A.
+    // After that, move between start + A and start - A:
+    // sent count 1 -> next -2A, sent count 2 -> next +2A, sent count 3 -> next -2A ...
+    if ((gBackAndForthSentCount % 2) == 1) {
+        return -2.0 * gBackAndForthBaseAngle;
     }
 
-    return -gBackAndForthBaseAngle;
+    return 2.0 * gBackAndForthBaseAngle;
 }
 
 void setAngleModeWidgetsEnabled(bool enabled)
@@ -178,6 +206,96 @@ void setAngleModeWidgetsEnabled(bool enabled)
 
     if (gAngleModeLabel != nullptr) {
         gAngleModeLabel->setEnabled(enabled);
+    }
+}
+
+void setSendAngleStatusIdle(const QString &text = QString())
+{
+    if (gSendAngleStatusLabel == nullptr) {
+        return;
+    }
+
+    gSendAngleStatusLabel->setText(text);
+    gSendAngleStatusLabel->setStyleSheet(SEND_ANGLE_STATUS_IDLE_STYLE);
+}
+
+void setSendAngleStatusSuccess()
+{
+    if (gSendAngleStatusLabel == nullptr) {
+        return;
+    }
+
+    gSendAngleStatusLabel->setText("Success");
+    gSendAngleStatusLabel->setStyleSheet(SEND_ANGLE_STATUS_SUCCESS_STYLE);
+}
+
+void setSendAngleStatusFailed()
+{
+    if (gSendAngleStatusLabel == nullptr) {
+        return;
+    }
+
+    gSendAngleStatusLabel->setText("Failed");
+    gSendAngleStatusLabel->setStyleSheet(SEND_ANGLE_STATUS_FAILED_STYLE);
+}
+
+void setupSendAngleStatusLabel(Ui::MainWindow *ui, QWidget *parent)
+{
+    if (parent == nullptr || ui == nullptr || ui->sendAngleButton == nullptr) {
+        return;
+    }
+
+    gSendAngleStatusLabel = parent->findChild<QLabel *>("sendAngleStatusLabel");
+
+    if (gSendAngleStatusLabel == nullptr) {
+        gSendAngleStatusLabel = new QLabel("", parent);
+        gSendAngleStatusLabel->setObjectName("sendAngleStatusLabel");
+        gSendAngleStatusLabel->setAlignment(Qt::AlignCenter);
+        gSendAngleStatusLabel->setMinimumHeight(28);
+        gSendAngleStatusLabel->setStyleSheet(SEND_ANGLE_STATUS_IDLE_STYLE);
+
+        QLayout *layout = parent->layout();
+
+        if (QBoxLayout *boxLayout = qobject_cast<QBoxLayout *>(layout)) {
+            int buttonIndex = boxLayout->indexOf(ui->sendAngleButton);
+            if (buttonIndex < 0) {
+                buttonIndex = boxLayout->count();
+            }
+
+            // 放在 Send Angle 按钮正上方。
+            boxLayout->insertWidget(buttonIndex, gSendAngleStatusLabel);
+        } else if (QGridLayout *gridLayout = qobject_cast<QGridLayout *>(layout)) {
+            int row = 0;
+            int column = 0;
+            int rowSpan = 1;
+            int columnSpan = 1;
+
+            int buttonIndex = gridLayout->indexOf(ui->sendAngleButton);
+            if (buttonIndex >= 0) {
+                gridLayout->getItemPosition(buttonIndex, &row, &column, &rowSpan, &columnSpan);
+                int statusRow = row > 0 ? row - 1 : row + 1;
+                gridLayout->addWidget(gSendAngleStatusLabel, statusRow, column, 1, columnSpan);
+            } else {
+                gridLayout->addWidget(gSendAngleStatusLabel, gridLayout->rowCount(), 0, 1, 2);
+            }
+        } else {
+            // Fallback for this absolute-positioned UI: place it just above Send Angle.
+            const QRect buttonRect = ui->sendAngleButton->geometry();
+            const int labelHeight = 30;
+            int x = buttonRect.left();
+            int y = buttonRect.top() - labelHeight - 8;
+
+            if (y < 0) {
+                y = buttonRect.bottom() + 8;
+            }
+
+            gSendAngleStatusLabel->setGeometry(x, y, buttonRect.width(), labelHeight);
+            gSendAngleStatusLabel->show();
+        }
+    } else {
+        gSendAngleStatusLabel->setAlignment(Qt::AlignCenter);
+        gSendAngleStatusLabel->setMinimumHeight(28);
+        gSendAngleStatusLabel->setStyleSheet(SEND_ANGLE_STATUS_IDLE_STYLE);
     }
 }
 
@@ -268,6 +386,8 @@ void setupAngleModeCombo(Ui::MainWindow *ui)
         return;
     }
 
+    setupSendAngleStatusLabel(ui, parent);
+
     // If you later add a combo box with objectName=angleModeCombo in Qt Designer,
     // this code will reuse it and will not create a duplicate.
     gAngleModeCombo = parent->findChild<QComboBox *>("angleModeCombo");
@@ -280,7 +400,7 @@ void setupAngleModeCombo(Ui::MainWindow *ui)
         gAngleModeCombo = new QComboBox(parent);
         gAngleModeCombo->setObjectName("angleModeCombo");
         gAngleModeCombo->addItem("Single Angle");
-        gAngleModeCombo->addItem("Back-and-Forth: +A -A Infinite");
+        gAngleModeCombo->addItem("Back-and-Forth: +A then ±2A");
 
         QLayout *layout = parent->layout();
 
@@ -518,6 +638,9 @@ MainWindow::MainWindow(QWidget *parent)
         ui->btnConnect->setText("Connect");
 
         addLog("Disconnected");
+        if (gMotorMoving || gAngleSequenceRunning) {
+            setSendAngleStatusFailed();
+        }
 
         // Clear motor busy state on disconnect to avoid a permanently locked button
         gMotorMoving = false;
@@ -577,6 +700,8 @@ void MainWindow::addLog(const QString &msg)
 // =====================================================
 void MainWindow::sendCommand(const QString &cmd, bool showLog)
 {
+    gLastCommandWriteOk = false;
+
     if (socket->state() != QAbstractSocket::ConnectedState) {
         addLog("Not connected");
         return;
@@ -588,6 +713,8 @@ void MainWindow::sendCommand(const QString &cmd, bool showLog)
 
     if (written != data.size()) {
         addLog("Socket write warning: " + socket->errorString());
+    } else {
+        gLastCommandWriteOk = true;
     }
 
     socket->flush();
@@ -720,6 +847,16 @@ void MainWindow::handleEsp32Line(const QString &line)
             ui->currentAngleEdit->setText(finalAngle);
         }
 
+        QRegularExpression statusRe("\\bSTATUS=([^\\s]+)");
+        QRegularExpressionMatch statusMatch = statusRe.match(line);
+        QString motorStatus = statusMatch.hasMatch() ? statusMatch.captured(1) : QString();
+
+        if (motorStatus.isEmpty() || motorStatus == "OK" || motorStatus == "POST_CORRECT_OK") {
+            setSendAngleStatusSuccess();
+        } else {
+            setSendAngleStatusFailed();
+        }
+
         gMotorMoving = false;
 
         if (gAngleSequenceRunning) {
@@ -793,6 +930,7 @@ void MainWindow::handleEsp32Line(const QString &line)
         gBackAndForthBaseAngle = 0.0;
         gBackAndForthSentCount = 0;
         setSendAngleIdle(ui);
+        setSendAngleStatusFailed();
         addLog("Motor command failed, send angle unlocked");
         return;
     }
@@ -934,11 +1072,13 @@ void MainWindow::on_sendAngleButton_clicked()
     }
 
     if (gMotorMoving) {
+        setSendAngleStatusFailed();
         addLog("Motor is moving, wait for MOTOR_DONE before sending next angle");
         return;
     }
 
     if (socket->state() != QAbstractSocket::ConnectedState) {
+        setSendAngleStatusFailed();
         addLog("Not connected");
         return;
     }
@@ -946,6 +1086,8 @@ void MainWindow::on_sendAngleButton_clicked()
     QString angleText = ui->angleEdit->text().trimmed();
 
     if (angleText.isEmpty()) {
+        setSendAngleStatusFailed();
+        addLog("Angle input empty");
         return;
     }
 
@@ -953,14 +1095,24 @@ void MainWindow::on_sendAngleButton_clicked()
     double angleValue = angleText.toDouble(&ok);
 
     if (!ok) {
+        setSendAngleStatusFailed();
         addLog("Angle format error");
+        return;
+    }
+
+    if (currentAngleSendMode() == MODE_BACK_AND_FORTH && angleValue == 0.0) {
+        setSendAngleStatusFailed();
+        addLog("Back-and-forth angle cannot be 0");
         return;
     }
 
     double firstAngle = angleValue;
 
     if (currentAngleSendMode() == MODE_BACK_AND_FORTH) {
-        // Back-and-forth mode: +A, -A, +A, -A ... infinite loop.
+        // Back-and-forth mode around the current/start angle.
+        // If current is C and user inputs A:
+        //   first send +A to C + A, then send -2A to C - A,
+        //   then +2A to C + A, and keep alternating.
         // Each segment waits for ESP32 MOTOR_DONE before the next segment is sent.
         gAngleSequenceRunning = true;
         gAngleSequenceStopRequested = false;
@@ -969,10 +1121,10 @@ void MainWindow::on_sendAngleButton_clicked()
         firstAngle = angleValue;
 
         addLog(
-            QString("Back-and-forth infinite start: first=%1, then alternate %2 / %3")
+            QString("Back-and-forth infinite start: first=%1, then alternate %2 / %3 around start position")
                 .arg(formatAngleForCommand(firstAngle))
-                .arg(formatAngleForCommand(angleValue))
-                .arg(formatAngleForCommand(-angleValue))
+                .arg(formatAngleForCommand(-2.0 * angleValue))
+                .arg(formatAngleForCommand(2.0 * angleValue))
             );
     } else {
         // Single angle mode.
@@ -989,6 +1141,19 @@ void MainWindow::on_sendAngleButton_clicked()
 
     QString cmd = QString("ANGLE:%1").arg(formatAngleForCommand(firstAngle));
     sendCommand(cmd);
+
+    if (gLastCommandWriteOk) {
+        setSendAngleStatusSuccess();
+    } else {
+        // TCP 写入失败时没有 MOTOR_DONE 回来，所以立即解锁按钮。
+        setSendAngleStatusFailed();
+        gMotorMoving = false;
+        gAngleSequenceRunning = false;
+        gAngleSequenceStopRequested = false;
+        gBackAndForthBaseAngle = 0.0;
+        gBackAndForthSentCount = 0;
+        setSendAngleIdle(ui);
+    }
 }
 
 // =====================================================
