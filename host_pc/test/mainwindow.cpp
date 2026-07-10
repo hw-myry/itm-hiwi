@@ -588,7 +588,9 @@ void positionEstopRestartTopRight(Ui::MainWindow *ui)
         x = minX;
     }
 
-    int y = qMax(25, wifiRect.top());
+    const int moveDown = 500;   // 改这里：数值越大，两个按钮越往下
+
+    int y = qMax(25, wifiRect.top()) + moveDown;
 
     gEstopButton->setGeometry(x, y, buttonSize, buttonSize);
     gRestartEsp32Button->setGeometry(x, y + buttonSize + gap, buttonSize, buttonSize);
@@ -768,7 +770,7 @@ void setupAngleModeCombo(Ui::MainWindow *ui)
     gAngleModeLabel = parent->findChild<QLabel *>("angleModeLabel");
 
     if (gAngleModeCombo == nullptr) {
-        gAngleModeLabel = new QLabel("Angle Mode:", parent);
+        gAngleModeLabel = new QLabel("Mode:", parent);
         gAngleModeLabel->setObjectName("angleModeLabel");
 
         gAngleModeCombo = new QComboBox(parent);
@@ -1166,6 +1168,7 @@ void positionMotorAngleBlockBelowParameter(Ui::MainWindow *ui);
 void positionStatusLogLeftAlignedWithWifi(Ui::MainWindow *ui);
 void positionSendAngleBlockBottomRight(Ui::MainWindow *ui);
 void setupAngleControlFrame(Ui::MainWindow *ui);
+QRect sendAngleAreaReferenceRect(Ui::MainWindow *ui);
 
 void setupResponsiveScaling(QObject *owner, Ui::MainWindow *ui)
 {
@@ -1187,10 +1190,13 @@ void setupResponsiveScaling(QObject *owner, Ui::MainWindow *ui)
         positionEstopRestartTopRight(ui);
         setupParameterFrame(ui);
         positionMotorAngleBlockBelowParameter(ui);
-        positionLedControlAboveEstop(ui);
-        setupLedControlFrame(ui);
+
+        // 先确定最下方 Send Angle 整体区域，再让 LED 和 Status Log 的右边框对齐它。
         positionSendAngleBlockBottomRight(ui);
         setupAngleControlFrame(ui);
+
+        positionLedControlAboveEstop(ui);
+        setupLedControlFrame(ui);
         positionStatusLogLeftAlignedWithWifi(ui);
 
         saveBaseUiGeometry(ui);
@@ -1569,6 +1575,55 @@ QRect boundingRectForWidgets(const QList<QWidget *> &widgets)
     return result;
 }
 
+QRect sendAngleAreaReferenceRect(Ui::MainWindow *ui)
+{
+    if (ui == nullptr || ui->centralwidget == nullptr) {
+        return QRect();
+    }
+
+    // 优先使用最下方整个 Send Angle / Motor Angle 外框。
+    // 这样 LED 区域和 Status Log 区域都能以同一个右边界为基准。
+    if (gAngleControlFrame != nullptr && gAngleControlFrame->geometry().isValid()) {
+        return gAngleControlFrame->geometry();
+    }
+
+    QWidget *parent = ui->centralwidget;
+    QList<QWidget *> widgets;
+
+    auto addWidget = [&](QWidget *w) {
+        if (w != nullptr && !widgets.contains(w)) {
+            widgets.append(w);
+        }
+    };
+
+    addWidget(findLabelContainsText(parent, QStringList() << "Motor Angle"));
+    addWidget(findLabelContainsText(parent, QStringList() << "Current Angle"));
+    addWidget(ui->angleEdit);
+    addWidget(ui->currentAngleEdit);
+    addWidget(gResetAngleButton);
+    addWidget(ui->sendAngleButton);
+    addWidget(gAngleModeLabel);
+    addWidget(gAngleModeCombo);
+
+    const QRect contentRect = boundingRectForWidgets(widgets);
+
+    if (!contentRect.isValid()) {
+        return QRect();
+    }
+
+    const int paddingLeft = 28;
+    const int paddingRight = 28;
+    const int paddingTop = 22;
+    const int paddingBottom = 22;
+
+    return QRect(
+        contentRect.left() - paddingLeft,
+        contentRect.top() - paddingTop,
+        contentRect.width() + paddingLeft + paddingRight,
+        contentRect.height() + paddingTop + paddingBottom
+        );
+}
+
 void moveWidgetsBy(const QList<QWidget *> &widgets, int dx, int dy)
 {
     for (QWidget *w : widgets) {
@@ -1647,8 +1702,6 @@ void positionLedControlAboveEstop(Ui::MainWindow *ui)
         return;
     }
 
-    QWidget *parent = ui->centralwidget;
-
     const int paddingLeft = 25;
     const int paddingRight = 25;
     const int paddingTop = 25;
@@ -1660,23 +1713,19 @@ void positionLedControlAboveEstop(Ui::MainWindow *ui)
                                     ? gParameterFrame->geometry()
                                     : QRect(20, 480, 700, 280);
 
-    // LED 控制区和参数区顶部对齐，并从原来的右侧位置向左下移动一点。
-    // 这里保留在参数区右边，避免压到 Save / 参数输入框。
-    const int gapFromParameter = 125;
-    const int marginRight = 35;
+    QRect sendAreaRect = sendAngleAreaReferenceRect(ui);
+    int targetFrameRight = sendAreaRect.isValid()
+                               ? sendAreaRect.right()
+                               : parameterRect.right() + 500;
 
-    int targetFrameLeft = parameterRect.right() + gapFromParameter;
-    const int maxFrameLeft = parent->width() - marginRight - frameWidth;
+    // 以最下方 Send Angle 整体区域的右边框为准：
+    // LED 框的右边框 = Send 区域右边框。
+    const int targetFrameLeft = targetFrameRight - frameWidth + 1;
 
-    if (parent->width() > frameWidth + marginRight && targetFrameLeft > maxFrameLeft) {
-        targetFrameLeft = maxFrameLeft;
-    }
+    // 比参数区顶部稍微往下，避免看起来贴得太高。
+    const int ledDownOffset = 25;
+    const int targetFrameTop = parameterRect.top() + ledDownOffset;
 
-    if (targetFrameLeft < parameterRect.right() + 35) {
-        targetFrameLeft = parameterRect.right() + 35;
-    }
-
-    const int targetFrameTop = parameterRect.top();
     const int targetContentLeft = targetFrameLeft + paddingLeft;
     const int targetContentTop = targetFrameTop + paddingTop;
 
@@ -1839,17 +1888,17 @@ void positionStatusLogLeftAlignedWithWifi(Ui::MainWindow *ui)
                                ? gConnectionFrame->geometry()
                                : QRect(20, 80, 800, 140);
 
-    const QRect ledFrameRect = (gLedControlFrame != nullptr)
-                                   ? gLedControlFrame->geometry()
-                                   : QRect(708, wifiRect.bottom() + 180, 380, 220);
-
-    const int gapBetweenModules = 5;   // 原来是 25，数字越小，越往右拉长
+    const int gapBetweenModules = 5;
     const int padding = 12;
     const int labelToLogGap = 8;
 
-    // 左边不动，只往右拉长
+    // 左边保持和 Wi-Fi 区域对齐，右边拉到和最下方 Send Angle 整体区域右边框对齐。
     const int frameLeft = wifiRect.left();
-    int frameRight = ledFrameRect.left() + 300;   // 数字越大，越往右拉长
+
+    QRect sendAreaRect = sendAngleAreaReferenceRect(ui);
+    int frameRight = sendAreaRect.isValid()
+                         ? sendAreaRect.right()
+                         : wifiRect.right();
 
     if (frameRight - frameLeft < 420) {
         frameRight = wifiRect.right();
@@ -2357,13 +2406,15 @@ MainWindow::MainWindow(QWidget *parent)
 
     // 把 ESTOP 和 Restart ESP32 放到右上角
     positionEstopRestartTopRight(ui);
+
+    // 最终排版顺序：
+    // 1) 先放好下方 Send Angle 整体区域并生成外框；
+    // 2) LED 右边框和 Status Log 右边框都以这个外框右边为准。
     positionMotorAngleBlockBelowParameter(ui);
+    positionSendAngleBlockBottomRight(ui);
+    setupAngleControlFrame(ui);
     positionLedControlAboveEstop(ui);
     setupLedControlFrame(ui);
-    fineTuneParameterAndLedLayout(ui);
-    positionSendAngleBlockBottomRight(ui);
-    moveSendAngleBlockLeftUp(ui);
-    setupAngleControlFrame(ui);
     positionStatusLogLeftAlignedWithWifi(ui);
 
     if (gEstopButton != nullptr) {
