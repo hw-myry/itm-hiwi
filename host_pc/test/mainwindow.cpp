@@ -2,6 +2,10 @@
 #include "./ui_mainwindow.h"
 
 #include <QApplication>
+#include <QCoreApplication>
+#include <QFileInfo>
+#include <QUrl>
+#include <QDesktopServices>
 #include <QDebug>
 #include <QDateTime>
 #include <QTimer>
@@ -57,6 +61,7 @@ QPushButton *gResetAngleButton = nullptr;
 QLabel *gSendAngleStatusLabel = nullptr;
 QPushButton *gEstopButton = nullptr;
 QPushButton *gRestartEsp32Button = nullptr;
+QPushButton *gOpenUserFileButton = nullptr;
 QLineEdit *gAbsAngleLimitEdit = nullptr;
 QLabel *gAbsAngleLimitLabel = nullptr;
 QLabel *gCommTextLabel = nullptr; // 注释 / Button Help
@@ -182,6 +187,20 @@ const char *ESTOP_BUTTON_STYLE =
     "}"
     "QPushButton:pressed {"
     " background-color: #b71c1c;"
+    "}";
+
+const char *USER_FILE_BUTTON_STYLE =
+    "QPushButton {"
+    " background-color: #e91e63;"
+    " color: white;"
+    " border-radius: 6px;"
+    " padding: 8px 16px;"
+    "}"
+    "QPushButton:hover {"
+    " background-color: #d81b60;"
+    "}"
+    "QPushButton:pressed {"
+    " background-color: #ad1457;"
     "}";
 
 const char *ESTOP_UNLOCK_BUTTON_STYLE =
@@ -544,7 +563,8 @@ void positionEstopRestartTopRight(Ui::MainWindow *ui)
     if (ui == nullptr ||
         ui->centralwidget == nullptr ||
         gEstopButton == nullptr ||
-        gRestartEsp32Button == nullptr) {
+        gRestartEsp32Button == nullptr ||
+        gOpenUserFileButton == nullptr) {
         return;
     }
 
@@ -572,20 +592,34 @@ void positionEstopRestartTopRight(Ui::MainWindow *ui)
 
     int y = qMax(25, wifiRect.top()) + moveDown;
 
+    // 新增 User TXT 按钮：默认放在 ESTOP 上方，不改变 ESTOP / Restart 的现有位置。
+    // userMoveUp 数值越大，User TXT 按钮越往上。
+    const int userMoveUp = 450;
+    int userY = y - buttonSize - gap - userMoveUp;
+    if (userY < 20) {
+        userY = 20;
+    }
+
+    gOpenUserFileButton->setGeometry(x, userY, buttonSize, buttonSize);
     gEstopButton->setGeometry(x, y, buttonSize, buttonSize);
     gRestartEsp32Button->setGeometry(x, y + buttonSize + gap, buttonSize, buttonSize);
 
+    gOpenUserFileButton->setMinimumSize(buttonSize, buttonSize);
+    gOpenUserFileButton->setMaximumSize(buttonSize, buttonSize);
     gEstopButton->setMinimumSize(buttonSize, buttonSize);
     gEstopButton->setMaximumSize(buttonSize, buttonSize);
     gRestartEsp32Button->setMinimumSize(buttonSize, buttonSize);
     gRestartEsp32Button->setMaximumSize(buttonSize, buttonSize);
 
     // 换行后在正方形按钮里更居中、更不容易被截断。
+    gOpenUserFileButton->setText("User\nTXT");
     gRestartEsp32Button->setText("Restart\nESP32");
 
+    gOpenUserFileButton->show();
     gEstopButton->show();
     gRestartEsp32Button->show();
 
+    gOpenUserFileButton->raise();
     gEstopButton->raise();
     gRestartEsp32Button->raise();
 }
@@ -650,6 +684,67 @@ void setupRestartEsp32Button(Ui::MainWindow *ui, QWidget *parent)
         gRestartEsp32Button->setMinimumHeight(48);
         gRestartEsp32Button->setStyleSheet(RESTART_ESP32_BUTTON_STYLE);
         gRestartEsp32Button->setToolTip("Restart ESP32 by sending ESTOP_REBOOT. The ESP32 will reboot with ESTOP latched until UNLOCK ESTOP is pressed.");
+    }
+}
+
+
+void setupOpenUserFileButton(Ui::MainWindow *ui, QWidget *parent)
+{
+    if (parent == nullptr || ui == nullptr || gEstopButton == nullptr) {
+        return;
+    }
+
+    gOpenUserFileButton = parent->findChild<QPushButton *>("openUserFileButton");
+
+    if (gOpenUserFileButton == nullptr) {
+        gOpenUserFileButton = new QPushButton("User\nTXT", parent);
+        gOpenUserFileButton->setObjectName("openUserFileButton");
+        gOpenUserFileButton->setMinimumHeight(48);
+        gOpenUserFileButton->setStyleSheet(USER_FILE_BUTTON_STYLE);
+        gOpenUserFileButton->setToolTip("Open local user.txt. Put user.txt in the same folder as the executable.");
+
+        QLayout *layout = parent->layout();
+
+        if (QBoxLayout *boxLayout = qobject_cast<QBoxLayout *>(layout)) {
+            int estopIndex = boxLayout->indexOf(gEstopButton);
+            if (estopIndex < 0) {
+                estopIndex = boxLayout->count();
+            }
+            boxLayout->insertWidget(estopIndex, gOpenUserFileButton);
+        } else if (QGridLayout *gridLayout = qobject_cast<QGridLayout *>(layout)) {
+            int row = 0;
+            int column = 0;
+            int rowSpan = 1;
+            int columnSpan = 1;
+
+            int estopIndex = gridLayout->indexOf(gEstopButton);
+            if (estopIndex >= 0) {
+                gridLayout->getItemPosition(estopIndex, &row, &column, &rowSpan, &columnSpan);
+                if (row > 0) {
+                    gridLayout->addWidget(gOpenUserFileButton, row - 1, column, 1, columnSpan);
+                } else {
+                    gridLayout->addWidget(gOpenUserFileButton, row + rowSpan, column, 1, columnSpan);
+                }
+            } else {
+                gridLayout->addWidget(gOpenUserFileButton, gridLayout->rowCount(), 0, 1, 2);
+            }
+        } else {
+            // Fallback for absolute-positioned UI. The final position is set by positionEstopRestartTopRight().
+            const QRect estopRect = gEstopButton->geometry();
+            const int buttonHeight = estopRect.height() > 0 ? estopRect.height() : 58;
+            int x = estopRect.left();
+            int y = estopRect.top() - buttonHeight - 14;
+            if (y < 0) {
+                y = estopRect.bottom() + 14;
+            }
+            gOpenUserFileButton->setGeometry(x, y, estopRect.width(), buttonHeight);
+            gOpenUserFileButton->show();
+        }
+    } else {
+        gOpenUserFileButton->setText("User\nTXT");
+        gOpenUserFileButton->setMinimumHeight(48);
+        gOpenUserFileButton->setStyleSheet(USER_FILE_BUTTON_STYLE);
+        gOpenUserFileButton->setToolTip("Open local user.txt. Put user.txt in the same folder as the executable.");
     }
 }
 
@@ -743,6 +838,7 @@ void setupAngleModeCombo(Ui::MainWindow *ui)
     setupSendAngleStatusLabel(ui, parent);
     setupEstopButton(ui, parent);
     setupRestartEsp32Button(ui, parent);
+    setupOpenUserFileButton(ui, parent);
 
     // If you later add a combo box with objectName=angleModeCombo in Qt Designer,
     // this code will reuse it and will not create a duplicate.
@@ -1130,6 +1226,10 @@ void applyUiScale(Ui::MainWindow *ui)
         gAngleControlFrame->lower();
     }
 
+    if (gOpenUserFileButton != nullptr) {
+        gOpenUserFileButton->raise();
+    }
+
     if (gEstopButton != nullptr) {
         gEstopButton->raise();
     }
@@ -1173,9 +1273,9 @@ void setupParameterFrame(Ui::MainWindow *ui);
 void positionMotorAngleBlockBelowParameter(Ui::MainWindow *ui);
 void positionStatusLogLeftAlignedWithWifi(Ui::MainWindow *ui);
 void positionSendAngleBlockBottomRight(Ui::MainWindow *ui);
+void positionSendAngleStatusLeftOfButton(Ui::MainWindow *ui);
 void setupAngleControlFrame(Ui::MainWindow *ui);
 QRect sendAngleAreaReferenceRect(Ui::MainWindow *ui);
-
 
 
 void applyModeFontToWholeUi(Ui::MainWindow *ui)
@@ -1808,6 +1908,31 @@ void positionLedControlAboveEstop(Ui::MainWindow *ui)
         );
 }
 
+void positionSendAngleStatusLeftOfButton(Ui::MainWindow *ui)
+{
+    if (ui == nullptr || ui->sendAngleButton == nullptr || gSendAngleStatusLabel == nullptr) {
+        return;
+    }
+
+    const QRect buttonRect = ui->sendAngleButton->geometry();
+
+    const int labelWidth = 160;
+    const int labelHeight = 45;
+    const int gap = 25;
+
+    int x = buttonRect.left() - gap - labelWidth;
+    int y = buttonRect.top() + (buttonRect.height() - labelHeight) / 2;
+
+    if (x < 10) {
+        x = 10;
+    }
+
+    gSendAngleStatusLabel->setGeometry(x, y, labelWidth, labelHeight);
+    gSendAngleStatusLabel->show();
+    gSendAngleStatusLabel->raise();
+}
+
+
 void positionSendAngleBlockBottomRight(Ui::MainWindow *ui)
 {
     if (ui == nullptr || ui->centralwidget == nullptr || ui->sendAngleButton == nullptr) {
@@ -1854,6 +1979,7 @@ void positionSendAngleBlockBottomRight(Ui::MainWindow *ui)
     ui->sendAngleButton->setGeometry(buttonX, buttonY, buttonWidth, buttonHeight);
     ui->sendAngleButton->show();
     ui->sendAngleButton->raise();
+    positionSendAngleStatusLeftOfButton(ui);
 
     const int comboY = buttonY + buttonHeight + 10;
     const int labelWidth = 70;
@@ -2164,7 +2290,7 @@ void positionParameterBlockUpAndSaveButton(Ui::MainWindow *ui)
     if (saveStyle.trimmed().isEmpty()) {
         saveStyle =
             "QPushButton {"
-            " background-color: #2e86de;"
+            " background-color: #f8bbd0;"
             " color: white;"
             " border-radius: 6px;"
             " padding: 6px 12px;"
@@ -2409,6 +2535,15 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
+    QLabel *colorPreviewTextLabel =
+        findLabelContainsText(ui->centralwidget, QStringList() << "Color Preview");
+
+    if (colorPreviewTextLabel != nullptr) {
+        colorPreviewTextLabel->setText("");
+        colorPreviewTextLabel->hide();
+        colorPreviewTextLabel->setEnabled(false);
+    }
+
     // 改颜色
 
     ui->centralwidget->setStyleSheet(
@@ -2495,6 +2630,32 @@ MainWindow::MainWindow(QWidget *parent)
     positionLedControlAboveEstop(ui);
     setupLedControlFrame(ui);
     positionStatusLogLeftAlignedWithWifi(ui);
+
+
+    if (gOpenUserFileButton != nullptr) {
+        connect(gOpenUserFileButton, &QPushButton::clicked, this, [=]() {
+            // user.txt 放在程序 exe 同一个文件夹里。
+            const QString userFilePath = QCoreApplication::applicationDirPath() + "/user.txt";
+            const QFileInfo userFileInfo(userFilePath);
+
+            if (!userFileInfo.exists() || !userFileInfo.isFile()) {
+                setSendAngleStatusFailed();
+                addLog("user.txt not found: " + userFileInfo.absoluteFilePath());
+                return;
+            }
+
+            const bool opened = QDesktopServices::openUrl(
+                QUrl::fromLocalFile(userFileInfo.absoluteFilePath())
+                );
+
+            if (opened) {
+                addLog("Opened user.txt: " + userFileInfo.absoluteFilePath());
+            } else {
+                setSendAngleStatusFailed();
+                addLog("Failed to open user.txt: " + userFileInfo.absoluteFilePath());
+            }
+        });
+    }
 
     if (gEstopButton != nullptr) {
         connect(gEstopButton, &QPushButton::clicked, this, [=]() {
