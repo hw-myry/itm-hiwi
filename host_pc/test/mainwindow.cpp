@@ -2563,7 +2563,7 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     ui->textBrowserLog->setPlainText(
-        "Please connect to \"ESP32_Motor\" Wi-Fi, then click Connect."
+        "Please connect to \"ESP32_Motor\" Wi-Fi, Pass: \"12345678\", then click Connect."
         );
 
     // Status Log / LED / 参数区的位置会在默认参数控件创建后统一排版。
