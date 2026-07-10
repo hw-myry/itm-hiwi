@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "./ui_mainwindow.h"
 
+#include <QApplication>
 #include <QDebug>
 #include <QDateTime>
 #include <QTimer>
@@ -101,7 +102,6 @@ const char *SEND_ANGLE_SINGLE_IDLE_STYLE =
     "QPushButton {"
     " background-color: #2ecc71;"
     " color: white;"
-    " font-weight: bold;"
     " border-radius: 6px;"
     " padding: 6px 12px;"
     "}"
@@ -113,7 +113,6 @@ const char *SEND_ANGLE_SWING_IDLE_STYLE =
     "QPushButton {"
     " background-color: #3498db;"
     " color: white;"
-    " font-weight: bold;"
     " border-radius: 6px;"
     " padding: 6px 12px;"
     "}"
@@ -125,21 +124,18 @@ const char *SEND_ANGLE_BUSY_STYLE =
     "QPushButton {"
     " background-color: #f39c12;"
     " color: white;"
-    " font-weight: bold;"
     " border-radius: 6px;"
     " padding: 6px 12px;"
     "}"
     "QPushButton:disabled {"
     " background-color: #f39c12;"
     " color: white;"
-    " font-weight: bold;"
     "}";
 
 const char *SEND_ANGLE_SWING_BUSY_STYLE =
     "QPushButton {"
     " background-color: #e74c3c;"
     " color: white;"
-    " font-weight: bold;"
     " border-radius: 6px;"
     " padding: 6px 12px;"
     "}"
@@ -151,21 +147,18 @@ const char *SEND_ANGLE_SWING_STOPPING_STYLE =
     "QPushButton {"
     " background-color: #7f8c8d;"
     " color: white;"
-    " font-weight: bold;"
     " border-radius: 6px;"
     " padding: 6px 12px;"
     "}"
     "QPushButton:disabled {"
     " background-color: #7f8c8d;"
     " color: white;"
-    " font-weight: bold;"
     "}";
 
 const char *RESET_ANGLE_BUTTON_STYLE =
     "QPushButton {"
     " background-color: #9b59b6;"
     " color: white;"
-    " font-weight: bold;"
     " border-radius: 6px;"
     " padding: 6px 12px;"
     "}"
@@ -175,15 +168,12 @@ const char *RESET_ANGLE_BUTTON_STYLE =
     "QPushButton:disabled {"
     " background-color: #bdc3c7;"
     " color: white;"
-    " font-weight: bold;"
     "}";
 
 const char *ESTOP_BUTTON_STYLE =
     "QPushButton {"
     " background-color: #e53935;"
     " color: white;"
-    " font-weight: bold;"
-    " font-size: 20px;"
     " border-radius: 6px;"
     " padding: 8px 16px;"
     "}"
@@ -198,8 +188,6 @@ const char *ESTOP_UNLOCK_BUTTON_STYLE =
     "QPushButton {"
     " background-color: #43a047;"
     " color: white;"
-    " font-weight: bold;"
-    " font-size: 18px;"
     " border-radius: 6px;"
     " padding: 8px 16px;"
     "}"
@@ -214,8 +202,6 @@ const char *RESTART_ESP32_BUTTON_STYLE =
     "QPushButton {"
     " background-color: #fb8c00;"
     " color: white;"
-    " font-weight: bold;"
-    " font-size: 16px;"
     " border-radius: 6px;"
     " padding: 8px 14px;"
     "}"
@@ -229,22 +215,16 @@ const char *RESTART_ESP32_BUTTON_STYLE =
 const char *SEND_ANGLE_STATUS_IDLE_STYLE =
     "QLabel {"
     " color: #7f8c8d;"
-    " font-weight: bold;"
-    " font-size: 24px;"
     "}";
 
 const char *SEND_ANGLE_STATUS_SUCCESS_STYLE =
     "QLabel {"
     " color: #1e88e5;"
-    " font-weight: bold;"
-    " font-size: 32px;"
     "}";
 
 const char *SEND_ANGLE_STATUS_FAILED_STYLE =
     "QLabel {"
     " color: #e74c3c;"
-    " font-weight: bold;"
-    " font-size: 32px;"
     "}";
 
 int currentAngleSendMode()
@@ -923,8 +903,6 @@ void setupCommText(QWidget *parent)
         " border: 2px solid #34495e;"
         " border-radius: 8px;"
         " padding: 10px;"
-        " font-size: 13px;"
-        " font-weight: bold;"
         "}"
         );
 
@@ -993,8 +971,6 @@ void setupSpeedUnitLabel(Ui::MainWindow *ui)
     gSpeedUnitLabel->setStyleSheet(
         "QLabel {"
         " color: #2c3e50;"
-        " font-size: 18px;"
-        " font-weight: bold;"
         "}"
         );
 
@@ -1007,6 +983,36 @@ void setupSpeedUnitLabel(Ui::MainWindow *ui)
     gSpeedUnitLabel->setGeometry(x, y, w, h);
     gSpeedUnitLabel->show();
     gSpeedUnitLabel->raise();
+}
+
+
+void removeFontRulesFromStyleSheet(QWidget *w);
+
+void applyModeFontToAllWidgets(Ui::MainWindow *ui)
+{
+    if (ui == nullptr || ui->centralwidget == nullptr) {
+        return;
+    }
+
+    QFont modeFont = (gAngleModeLabel != nullptr)
+                         ? gAngleModeLabel->font()
+                         : QApplication::font();
+    modeFont.setBold(false);
+    modeFont.setItalic(false);
+
+    ui->centralwidget->setFont(modeFont);
+
+    const QList<QWidget *> widgets =
+        ui->centralwidget->findChildren<QWidget *>(QString(), Qt::FindChildrenRecursively);
+
+    for (QWidget *w : widgets) {
+        if (w == nullptr) {
+            continue;
+        }
+
+        removeFontRulesFromStyleSheet(w);
+        w->setFont(modeFont);
+    }
 }
 
 void saveBaseUiGeometry(Ui::MainWindow *ui)
@@ -1170,6 +1176,47 @@ void positionSendAngleBlockBottomRight(Ui::MainWindow *ui);
 void setupAngleControlFrame(Ui::MainWindow *ui);
 QRect sendAngleAreaReferenceRect(Ui::MainWindow *ui);
 
+
+
+void applyModeFontToWholeUi(Ui::MainWindow *ui)
+{
+    if (ui == nullptr || ui->centralwidget == nullptr) {
+        return;
+    }
+
+    // Use the same font style as the Mode label. If the Mode label has not
+    // been created yet, fall back to the Qt application default UI font.
+    QFont modeFont = (gAngleModeLabel != nullptr)
+                         ? gAngleModeLabel->font()
+                         : QApplication::font();
+
+    // Keep every widget in the same family/style as Mode.
+    modeFont.setBold(false);
+    modeFont.setItalic(false);
+
+    if (modeFont.pointSize() <= 0) {
+        modeFont.setPointSize(9);
+    }
+
+    QList<QWidget *> widgets;
+    widgets << ui->centralwidget;
+    widgets << ui->centralwidget->findChildren<QWidget *>(QString(), Qt::FindChildrenRecursively);
+
+    for (QWidget *w : widgets) {
+        if (w == nullptr) {
+            continue;
+        }
+
+        // Some style sheets had font-size / font-weight rules. Those rules
+        // override setFont(), so remove only the font rules and keep colors,
+        // borders, background colors, radius, padding, etc.
+        removeFontRulesFromStyleSheet(w);
+        w->setFont(modeFont);
+    }
+}
+
+
+
 void setupResponsiveScaling(QObject *owner, Ui::MainWindow *ui)
 {
     if (owner == nullptr || ui == nullptr || ui->centralwidget == nullptr) {
@@ -1199,6 +1246,8 @@ void setupResponsiveScaling(QObject *owner, Ui::MainWindow *ui)
         setupLedControlFrame(ui);
         positionStatusLogLeftAlignedWithWifi(ui);
 
+        // applyModeFontToAllWidgets(ui);
+        applyModeFontToWholeUi(ui);
         saveBaseUiGeometry(ui);
         applyUiScale(ui);
     });
@@ -1513,6 +1562,27 @@ QLabel *findLabelExactText(QWidget *parent, const QString &keyword)
 
     return nullptr;
 }
+
+void removeFontRulesFromStyleSheet(QWidget *w)
+{
+    if (w == nullptr) {
+        return;
+    }
+
+    QString ss = w->styleSheet();
+
+    if (ss.trimmed().isEmpty()) {
+        return;
+    }
+
+    ss.remove(QRegularExpression("font-family\\s*:[^;]+;"));
+    ss.remove(QRegularExpression("font-size\\s*:[^;]+;"));
+    ss.remove(QRegularExpression("font-weight\\s*:[^;]+;"));
+    ss.remove(QRegularExpression("font-style\\s*:[^;]+;"));
+
+    w->setStyleSheet(ss);
+}
+
 
 QList<QWidget *> ledControlWidgets(Ui::MainWindow *ui)
 {
@@ -1948,19 +2018,29 @@ void setupParameterLabelFont(Ui::MainWindow *ui)
                    ? gAbsAngleLimitLabel
                    : findLabelContainsText(parent, QStringList() << "Abs Angle"));
 
+    // 用 Mode 的字体作为标准
+    QFont modeFont;
+
+    if (gAngleModeLabel != nullptr) {
+        modeFont = gAngleModeLabel->font();
+    } else {
+        modeFont = QApplication::font();
+    }
+
+    modeFont.setBold(false);
+    modeFont.setItalic(false);
+    // Do not force point size; keep it exactly the same as Mode.
+
     for (QLabel *label : labels) {
         if (label == nullptr) {
             continue;
         }
 
-        QFont font = label->font();
-        font.setPointSize(14);     // 改这里：字体大小
-        font.setBold(true);        // true = 加粗，false = 不加粗
-        label->setFont(font);
+        label->setFont(modeFont);
 
         label->setStyleSheet(
             "QLabel {"
-            " color: black;"       // 改这里：字体颜色
+            " color: black;"
             "}"
             );
     }
@@ -2086,7 +2166,6 @@ void positionParameterBlockUpAndSaveButton(Ui::MainWindow *ui)
             "QPushButton {"
             " background-color: #2e86de;"
             " color: white;"
-            " font-weight: bold;"
             " border-radius: 6px;"
             " padding: 6px 12px;"
             "}"
@@ -2096,7 +2175,6 @@ void positionParameterBlockUpAndSaveButton(Ui::MainWindow *ui)
             "QPushButton:disabled {"
             " background-color: #9bbce6;"
             " color: white;"
-            " font-weight: bold;"
             "}";
     }
     ui->btnSaveParameter->setStyleSheet(saveStyle);
@@ -2370,7 +2448,7 @@ MainWindow::MainWindow(QWidget *parent)
     ui->lineEditPort->setText("8080");
 
     ui->labelConnectStatus->setText("Disconnected");
-    ui->labelConnectStatus->setStyleSheet("color:red; font-weight:bold;");
+    ui->labelConnectStatus->setStyleSheet("color:red;");
 
     // =====================================================
     // Default parameter display
@@ -2403,6 +2481,7 @@ MainWindow::MainWindow(QWidget *parent)
     // 这里会创建 ESTOP / Restart / Reset Angle Zero，所以 LED 和 Motor Angle 的最终位置放在这之后调整。
     // Angle send mode combo box + initial button state
     setupAngleModeCombo(ui);
+    setupParameterLabelFont(ui);
 
     // 把 ESTOP 和 Restart ESP32 放到右上角
     positionEstopRestartTopRight(ui);
@@ -2559,7 +2638,7 @@ MainWindow::MainWindow(QWidget *parent)
     // =====================================================
     connect(socket, &QTcpSocket::connected, this, [=]() {
         ui->labelConnectStatus->setText("Connected");
-        ui->labelConnectStatus->setStyleSheet("color:green; font-weight:bold;");
+        ui->labelConnectStatus->setStyleSheet("color:green;");
         ui->btnConnect->setText("Disconnect");
 
         addLog("Connected to ESP32");
@@ -2575,7 +2654,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(socket, &QTcpSocket::disconnected, this, [=]() {
         ui->labelConnectStatus->setText("Disconnected");
-        ui->labelConnectStatus->setStyleSheet("color:red; font-weight:bold;");
+        ui->labelConnectStatus->setStyleSheet("color:red;");
         ui->btnConnect->setText("Connect");
 
         addLog("Disconnected");
@@ -2621,6 +2700,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->sliderR, &QSlider::valueChanged, this, &MainWindow::sendRGB);
     connect(ui->sliderG, &QSlider::valueChanged, this, &MainWindow::sendRGB);
     connect(ui->sliderB, &QSlider::valueChanged, this, &MainWindow::sendRGB);
+
+    applyModeFontToWholeUi(ui);
 
     // Enable whole-window linear scaling after all dynamic widgets have been created.
     setupResponsiveScaling(this, ui);
