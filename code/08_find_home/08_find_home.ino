@@ -76,8 +76,8 @@ const float ANGLE_LIMIT_EPS = 0.01f;
 // LED
 // =====================================================
 // GPIO38 现在接到 A4988 EN 引脚，不能再同时作为 NeoPixel LED 引脚使用。
-// 如果以后把 LED 换到其他 GPIO，可以把 USE_NEOPIXEL_LED 改成 1 并修改 LED_PIN。
-#define USE_NEOPIXEL_LED 0
+
+#define USE_NEOPIXEL_LED 1
 #define LED_PIN 38
 #define LED_COUNT 1
 
@@ -94,8 +94,8 @@ bool ledEnabled = false;
 #define DIR_PIN 40
 
 // A4988 EN / ENABLE 引脚：LOW = 使能输出，HIGH = 禁止输出。
-// 你已经把 GPIO38 接到了 A4988 EN，所以急停时直接把 GPIO38 拉高。
-#define EN_PIN 38
+
+#define EN_PIN 41
 #define A4988_ENABLE_ACTIVE_LOW 1
 
 #define ENCODE_CLK 5
