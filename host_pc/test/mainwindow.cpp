@@ -67,6 +67,7 @@ QLabel *gWifiTitleLabel = nullptr;
 QFrame *gStatusLogFrame = nullptr;  // Status Log 边框
 QFrame *gLedControlFrame = nullptr; // LED Control 边框
 QFrame *gParameterFrame = nullptr;  // PID / Speed / Angle Limit 参数边框
+QFrame *gAngleControlFrame = nullptr; // Motor Angle / Send Angle 区域边框
 
 // =====================================================
 // Whole-window linear scaling state
@@ -1117,6 +1118,10 @@ void applyUiScale(Ui::MainWindow *ui)
         gParameterFrame->lower();
     }
 
+    if (gAngleControlFrame != nullptr) {
+        gAngleControlFrame->lower();
+    }
+
     if (gEstopButton != nullptr) {
         gEstopButton->raise();
     }
@@ -1159,6 +1164,8 @@ void setupLedControlFrame(Ui::MainWindow *ui);
 void setupParameterFrame(Ui::MainWindow *ui);
 void positionMotorAngleBlockBelowParameter(Ui::MainWindow *ui);
 void positionStatusLogLeftAlignedWithWifi(Ui::MainWindow *ui);
+void positionSendAngleBlockBottomRight(Ui::MainWindow *ui);
+void setupAngleControlFrame(Ui::MainWindow *ui);
 
 void setupResponsiveScaling(QObject *owner, Ui::MainWindow *ui)
 {
@@ -1178,10 +1185,12 @@ void setupResponsiveScaling(QObject *owner, Ui::MainWindow *ui)
         // 构造函数刚运行时 centralwidget 的真实宽度可能还没准备好，
         // 所以这里再排一次右侧模块，避免 LED / Save / 参数框相互重叠。
         positionEstopRestartTopRight(ui);
-        positionLedControlAboveEstop(ui);
-        setupLedControlFrame(ui);
         setupParameterFrame(ui);
         positionMotorAngleBlockBelowParameter(ui);
+        positionLedControlAboveEstop(ui);
+        setupLedControlFrame(ui);
+        positionSendAngleBlockBottomRight(ui);
+        setupAngleControlFrame(ui);
         positionStatusLogLeftAlignedWithWifi(ui);
 
         saveBaseUiGeometry(ui);
@@ -1638,15 +1647,8 @@ void positionLedControlAboveEstop(Ui::MainWindow *ui)
         return;
     }
 
-    const QRect estopRect = (gEstopButton != nullptr)
-                                ? gEstopButton->geometry()
-                                : QRect(1050, 50, 120, 120);
+    QWidget *parent = ui->centralwidget;
 
-    const QRect restartRect = (gRestartEsp32Button != nullptr)
-                                  ? gRestartEsp32Button->geometry()
-                                  : QRect(estopRect.left(), estopRect.bottom() + 18, 120, 120);
-
-    const int frameGap = 25;
     const int paddingLeft = 25;
     const int paddingRight = 25;
     const int paddingTop = 25;
@@ -1654,16 +1656,30 @@ void positionLedControlAboveEstop(Ui::MainWindow *ui)
 
     const int frameWidth = contentRect.width() + paddingLeft + paddingRight;
 
-    // LED 模块放在右侧，位于两个正方形按钮下方；
-    // 真实窗口尺寸准备好后会再次调用本函数，把它推到右边，避免和参数框 / Save 按钮重叠。
-    const int targetFrameRight = restartRect.right();
-    const int targetFrameLeft = qMax(20, targetFrameRight - frameWidth + 1);
-    const int targetFrameTop = restartRect.bottom() + frameGap;
+    const QRect parameterRect = (gParameterFrame != nullptr)
+                                    ? gParameterFrame->geometry()
+                                    : QRect(20, 480, 700, 280);
 
+    // LED 控制区和参数区顶部对齐，并从原来的右侧位置向左下移动一点。
+    // 这里保留在参数区右边，避免压到 Save / 参数输入框。
+    const int gapFromParameter = 125;
+    const int marginRight = 35;
+
+    int targetFrameLeft = parameterRect.right() + gapFromParameter;
+    const int maxFrameLeft = parent->width() - marginRight - frameWidth;
+
+    if (parent->width() > frameWidth + marginRight && targetFrameLeft > maxFrameLeft) {
+        targetFrameLeft = maxFrameLeft;
+    }
+
+    if (targetFrameLeft < parameterRect.right() + 35) {
+        targetFrameLeft = parameterRect.right() + 35;
+    }
+
+    const int targetFrameTop = parameterRect.top();
     const int targetContentLeft = targetFrameLeft + paddingLeft;
     const int targetContentTop = targetFrameTop + paddingTop;
 
-    Q_UNUSED(paddingRight);
     Q_UNUSED(paddingBottom);
 
     moveWidgetsBy(
@@ -1671,6 +1687,143 @@ void positionLedControlAboveEstop(Ui::MainWindow *ui)
         targetContentLeft - contentRect.left(),
         targetContentTop - contentRect.top()
         );
+}
+
+void positionSendAngleBlockBottomRight(Ui::MainWindow *ui)
+{
+    if (ui == nullptr || ui->centralwidget == nullptr || ui->sendAngleButton == nullptr) {
+        return;
+    }
+
+    QWidget *parent = ui->centralwidget;
+
+    const QRect currentButtonRect = ui->sendAngleButton->geometry();
+    const int buttonWidth = qMax(250, currentButtonRect.width());
+    const int buttonHeight = qMax(90, currentButtonRect.height());
+
+    // Send Angle 模块往右下角移动一点。
+    const int marginRight = 260;
+    int buttonX = parent->width() - marginRight - buttonWidth;
+
+    if (gParameterFrame != nullptr) {
+        buttonX = qMax(buttonX, gParameterFrame->geometry().right() + 120);
+    }
+
+    if (buttonX + buttonWidth > parent->width() - 20) {
+        buttonX = parent->width() - buttonWidth - 20;
+    }
+
+    if (buttonX < 20) {
+        buttonX = 20;
+    }
+
+    int buttonY = currentButtonRect.top() + 45;
+
+    if (gParameterFrame != nullptr) {
+        buttonY = qMax(buttonY, gParameterFrame->geometry().bottom() + 38);
+    }
+
+    const int comboHeight = (gAngleModeCombo != nullptr && gAngleModeCombo->height() > 0)
+                                ? gAngleModeCombo->height()
+                                : 28;
+    const int bottomLimit = parent->height() - buttonHeight - comboHeight - 35;
+
+    if (bottomLimit > 0 && buttonY > bottomLimit) {
+        buttonY = bottomLimit;
+    }
+
+    ui->sendAngleButton->setGeometry(buttonX, buttonY, buttonWidth, buttonHeight);
+    ui->sendAngleButton->show();
+    ui->sendAngleButton->raise();
+
+    const int comboY = buttonY + buttonHeight + 10;
+    const int labelWidth = 70;
+    const int comboWidth = (gAngleModeCombo != nullptr && gAngleModeCombo->width() > 0)
+                               ? qMax(200, gAngleModeCombo->width())
+                               : 200;
+
+    if (gAngleModeLabel != nullptr) {
+        gAngleModeLabel->setGeometry(buttonX, comboY, labelWidth, comboHeight);
+        gAngleModeLabel->show();
+        gAngleModeLabel->raise();
+    }
+
+    if (gAngleModeCombo != nullptr) {
+        gAngleModeCombo->setGeometry(buttonX + labelWidth + 8, comboY, comboWidth, comboHeight);
+        gAngleModeCombo->show();
+        gAngleModeCombo->raise();
+    }
+}
+
+
+
+void setupAngleControlFrame(Ui::MainWindow *ui)
+{
+    if (ui == nullptr || ui->centralwidget == nullptr || ui->sendAngleButton == nullptr) {
+        return;
+    }
+
+    QWidget *parent = ui->centralwidget;
+
+    QList<QWidget *> widgets;
+
+    auto addWidget = [&](QWidget *w) {
+        if (w != nullptr && !widgets.contains(w)) {
+            widgets.append(w);
+        }
+    };
+
+    addWidget(findLabelContainsText(parent, QStringList() << "Motor Angle"));
+    addWidget(findLabelContainsText(parent, QStringList() << "Current Angle"));
+    addWidget(ui->angleEdit);
+    addWidget(ui->currentAngleEdit);
+    addWidget(gResetAngleButton);
+    addWidget(ui->sendAngleButton);
+    addWidget(gAngleModeLabel);
+    addWidget(gAngleModeCombo);
+
+    const QRect contentRect = boundingRectForWidgets(widgets);
+
+    if (!contentRect.isValid()) {
+        return;
+    }
+
+    gAngleControlFrame = parent->findChild<QFrame *>("angleControlFrame");
+
+    if (gAngleControlFrame == nullptr) {
+        gAngleControlFrame = new QFrame(parent);
+        gAngleControlFrame->setObjectName("angleControlFrame");
+    }
+
+    gAngleControlFrame->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    gAngleControlFrame->setStyleSheet(
+        "QFrame#angleControlFrame {"
+        " background-color: transparent;"
+        " border: 2px solid #34495e;"
+        " border-radius: 10px;"
+        "}"
+        );
+
+    const int paddingLeft = 28;
+    const int paddingRight = 28;
+    const int paddingTop = 22;
+    const int paddingBottom = 22;
+
+    gAngleControlFrame->setGeometry(
+        contentRect.left() - paddingLeft,
+        contentRect.top() - paddingTop,
+        contentRect.width() + paddingLeft + paddingRight,
+        contentRect.height() + paddingTop + paddingBottom
+        );
+
+    gAngleControlFrame->show();
+    gAngleControlFrame->lower();
+
+    for (QWidget *w : widgets) {
+        if (w != nullptr) {
+            w->raise();
+        }
+    }
 }
 
 void positionStatusLogLeftAlignedWithWifi(Ui::MainWindow *ui)
@@ -1690,13 +1843,13 @@ void positionStatusLogLeftAlignedWithWifi(Ui::MainWindow *ui)
                                    ? gLedControlFrame->geometry()
                                    : QRect(708, wifiRect.bottom() + 180, 380, 220);
 
-    const int gapBetweenModules = 25;
+    const int gapBetweenModules = 5;   // 原来是 25，数字越小，越往右拉长
     const int padding = 12;
     const int labelToLogGap = 8;
 
-    // Status 区域左边和 Wi-Fi 模块左边对齐；右边尽量停在 LED 模块左侧。
+    // 左边不动，只往右拉长
     const int frameLeft = wifiRect.left();
-    int frameRight = ledFrameRect.left() - gapBetweenModules;
+    int frameRight = ledFrameRect.left() + 300;   // 数字越大，越往右拉长
 
     if (frameRight - frameLeft < 420) {
         frameRight = wifiRect.right();
@@ -1726,6 +1879,42 @@ void positionStatusLogLeftAlignedWithWifi(Ui::MainWindow *ui)
     ui->textBrowserLog->raise();
 
     setupStatusLogFrame(ui);
+}
+
+
+void setupParameterLabelFont(Ui::MainWindow *ui)
+{
+    if (ui == nullptr || ui->centralwidget == nullptr) {
+        return;
+    }
+
+    QWidget *parent = ui->centralwidget;
+
+    QList<QLabel *> labels;
+    labels << findLabelExactText(parent, "KP");
+    labels << findLabelExactText(parent, "KI");
+    labels << findLabelExactText(parent, "KD");
+    labels << findLabelContainsText(parent, QStringList() << "Speed");
+    labels << (gAbsAngleLimitLabel != nullptr
+                   ? gAbsAngleLimitLabel
+                   : findLabelContainsText(parent, QStringList() << "Abs Angle"));
+
+    for (QLabel *label : labels) {
+        if (label == nullptr) {
+            continue;
+        }
+
+        QFont font = label->font();
+        font.setPointSize(14);     // 改这里：字体大小
+        font.setBold(true);        // true = 加粗，false = 不加粗
+        label->setFont(font);
+
+        label->setStyleSheet(
+            "QLabel {"
+            " color: black;"       // 改这里：字体颜色
+            "}"
+            );
+    }
 }
 
 void arrangeSpeedAndAngleLimitUnderKd(Ui::MainWindow *ui)
@@ -1984,6 +2173,105 @@ void positionMotorAngleBlockBelowParameter(Ui::MainWindow *ui)
 }
 
 
+void fineTuneParameterAndLedLayout(Ui::MainWindow *ui)
+{
+    if (ui == nullptr || ui->centralwidget == nullptr) {
+        return;
+    }
+
+    const int moveUpPx = 30;        // 参数区和 LED 区整体往上移动，数字越大越往上
+    const int moveLedLeftPx = 4000;   // LED 区往左靠近参数区，数字越大越靠近
+
+    QList<QWidget *> parameterWidgets;
+
+    auto addParameterWidget = [&](QWidget *w) {
+        if (w != nullptr && !parameterWidgets.contains(w)) {
+            parameterWidgets.append(w);
+        }
+    };
+
+    QWidget *parent = ui->centralwidget;
+
+    addParameterWidget(gParameterFrame);
+    addParameterWidget(findLabelExactText(parent, "KP"));
+    addParameterWidget(findLabelExactText(parent, "KI"));
+    addParameterWidget(findLabelExactText(parent, "KD"));
+    addParameterWidget(findLabelContainsText(parent, QStringList() << "Speed"));
+    addParameterWidget(gAbsAngleLimitLabel != nullptr
+                           ? gAbsAngleLimitLabel
+                           : findLabelContainsText(parent, QStringList() << "Angle Limit"));
+
+    addParameterWidget(ui->kpEdit);
+    addParameterWidget(ui->kiEdit);
+    addParameterWidget(ui->kdEdit);
+    addParameterWidget(ui->speedEdit);
+    addParameterWidget(gAbsAngleLimitEdit);
+    addParameterWidget(gSpeedUnitLabel);
+    addParameterWidget(ui->btnSaveParameter);
+
+    // 参数区域整体往上
+    moveWidgetsBy(parameterWidgets, 0, -moveUpPx);
+
+    QList<QWidget *> ledWidgets = ledControlWidgets(ui);
+
+    if (gLedControlFrame != nullptr && !ledWidgets.contains(gLedControlFrame)) {
+        ledWidgets.append(gLedControlFrame);
+    }
+
+    // LED 区域：往上，同时往左靠近参数区
+    moveWidgetsBy(ledWidgets, -moveLedLeftPx, -moveUpPx);
+
+    if (gParameterFrame != nullptr) {
+        gParameterFrame->lower();
+    }
+
+    if (gLedControlFrame != nullptr) {
+        gLedControlFrame->lower();
+    }
+
+    for (QWidget *w : parameterWidgets) {
+        if (w != nullptr && w != gParameterFrame) {
+            w->raise();
+        }
+    }
+
+    for (QWidget *w : ledWidgets) {
+        if (w != nullptr && w != gLedControlFrame) {
+            w->raise();
+        }
+    }
+}
+void moveSendAngleBlockLeftUp(Ui::MainWindow *ui)
+{
+    if (ui == nullptr) {
+        return;
+    }
+
+    const int moveLeftPx = 40;  // 数字越大，越往左
+    const int moveUpPx = 50;    // 数字越大，越往上
+
+    QList<QWidget *> widgets;
+
+    auto addWidget = [&](QWidget *w) {
+        if (w != nullptr && !widgets.contains(w)) {
+            widgets.append(w);
+        }
+    };
+
+    addWidget(ui->sendAngleButton);
+    addWidget(gAngleModeLabel);
+    addWidget(gAngleModeCombo);
+
+    moveWidgetsBy(widgets, -moveLeftPx, -moveUpPx);
+
+    for (QWidget *w : widgets) {
+        if (w != nullptr) {
+            w->show();
+            w->raise();
+        }
+    }
+}
+
 
 // =====================================================
 // Constructor
@@ -2072,6 +2360,10 @@ MainWindow::MainWindow(QWidget *parent)
     positionMotorAngleBlockBelowParameter(ui);
     positionLedControlAboveEstop(ui);
     setupLedControlFrame(ui);
+    fineTuneParameterAndLedLayout(ui);
+    positionSendAngleBlockBottomRight(ui);
+    moveSendAngleBlockLeftUp(ui);
+    setupAngleControlFrame(ui);
     positionStatusLogLeftAlignedWithWifi(ui);
 
     if (gEstopButton != nullptr) {
