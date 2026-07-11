@@ -1,0 +1,17 @@
+Stepper Motor Controller User Manual
+
+1. Connect your computer to the Wi-Fi network “ESP32_Motor” broadcast by the ESP32. The password is 12345678.
+
+2. After the connection is successful, a log message will be printed, and “Disconnected” will change to “Connected".
+
+3. In Motor Angle, you can enter the rotation angle, such as 30 or -50. However, the total angle must not exceed the Angle Limit.
+ 
+4. Click the “Send Angle” button to send the rotation command. The Mode option can be set to either Single Send or Loop Send.
+
+5. Reset Angle Zero is used to manually set the zero point.
+
+6. In an emergency, you can press ESTOP to stop the motor immediately. Restart ESP32 is used to perform a software restart of the ESP32.
+
+7. It is not recommended to modify the KP, KI, KD, or Angle Limit parameters. 
+
+8. The Speed value can be adjusted, but it is recommended to keep it below 600.

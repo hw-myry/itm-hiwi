@@ -119,13 +119,16 @@ int gSaveParameterSequenceId = 0;
 
 const char *SEND_ANGLE_SINGLE_IDLE_STYLE =
     "QPushButton {"
-    " background-color: #2ecc71;"
+    " background-color: #3498db;"
     " color: white;"
     " border-radius: 6px;"
     " padding: 6px 12px;"
     "}"
     "QPushButton:hover {"
-    " background-color: #27ae60;"
+    " background-color: #2980b9;"
+    "}"
+    "QPushButton:pressed {"
+    " background-color: #21618c;"
     "}";
 
 const char *SEND_ANGLE_SWING_IDLE_STYLE =
@@ -176,19 +179,19 @@ const char *SEND_ANGLE_SWING_STOPPING_STYLE =
 
 const char *GREEN_BUTTON_STYLE =
     "QPushButton {"
-    " background-color: #2ecc71;"
+    " background-color: #3498db;"
     " color: white;"
     " border-radius: 6px;"
     " padding: 6px 12px;"
     "}"
     "QPushButton:hover {"
-    " background-color: #27ae60;"
+    " background-color: #2980b9;"
     "}"
     "QPushButton:pressed {"
-    " background-color: #1e8449;"
+    " background-color: #21618c;"
     "}"
     "QPushButton:disabled {"
-    " background-color: #a5d6a7;"
+    " background-color: #aed6f1;"
     " color: white;"
     "}";
 
@@ -212,16 +215,16 @@ const char *USER_FILE_BUTTON_STYLE = GREEN_BUTTON_STYLE;
 
 const char *ESTOP_UNLOCK_BUTTON_STYLE =
     "QPushButton {"
-    " background-color: #43a047;"
+    " background-color: #3498db;"
     " color: white;"
     " border-radius: 6px;"
     " padding: 8px 16px;"
     "}"
     "QPushButton:hover {"
-    " background-color: #2e7d32;"
+    " background-color: #2980b9;"
     "}"
     "QPushButton:pressed {"
-    " background-color: #1b5e20;"
+    " background-color: #21618c;"
     "}";
 
 const char *RESTART_ESP32_BUTTON_STYLE =
@@ -3226,7 +3229,7 @@ MainWindow::MainWindow(QWidget *parent)
     // =====================================================
     connect(socket, &QTcpSocket::connected, this, [=]() {
         ui->labelConnectStatus->setText("Connected");
-        ui->labelConnectStatus->setStyleSheet("color:green;");
+        ui->labelConnectStatus->setStyleSheet("color:#2ecc71;");
         ui->btnConnect->setText("Disconnect");
         ui->btnConnect->setStyleSheet(GREEN_BUTTON_STYLE);
 
