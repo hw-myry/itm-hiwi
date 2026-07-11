@@ -12,6 +12,7 @@
 #include <QRegularExpression>
 #include <QDoubleValidator>
 #include <QComboBox>
+#include <QAbstractItemView>
 #include <QLabel>
 #include <QLayout>
 #include <QBoxLayout>
@@ -566,6 +567,7 @@ void positionEstopRestartTopRight(Ui::MainWindow *ui)
     // 右上角横向排列：User TXT 在最左，Restart ESP32 在中间，ESTOP 保持原来的右上角位置。
     const int buttonSize = 120;
     const int gap = 18;
+    const int userGroupGap = 58;  // User TXT 再往左一些，和 Restart / ESTOP 这一组拉开距离。
     const int marginRight = 35;
     const int marginTop = 25;
 
@@ -588,7 +590,7 @@ void positionEstopRestartTopRight(Ui::MainWindow *ui)
     }
 
     const int restartX = estopX - gap - buttonSize;
-    const int userX = restartX - gap - buttonSize;
+    const int userX = restartX - userGroupGap - buttonSize;
 
     gOpenUserFileButton->setGeometry(userX, topY, buttonSize, buttonSize);
     gRestartEsp32Button->setGeometry(restartX, topY, buttonSize, buttonSize);
@@ -842,7 +844,7 @@ void setupAngleModeCombo(Ui::MainWindow *ui)
         gAngleModeCombo = new QComboBox(parent);
         gAngleModeCombo->setObjectName("angleModeCombo");
         gAngleModeCombo->addItem("Single Angle");
-        gAngleModeCombo->addItem("Back-and-Forth: +A then ±2A");
+        gAngleModeCombo->addItem("Back-and-Forth");
 
         QLayout *layout = parent->layout();
 
@@ -937,6 +939,16 @@ void setupAngleModeCombo(Ui::MainWindow *ui)
         gResetAngleButton->setText("Reset Angle Zero");
         gResetAngleButton->setStyleSheet(RESET_ANGLE_BUTTON_STYLE);
         gResetAngleButton->setToolTip("Set the ESP32 encoder angle to zero. Disabled while the motor is moving.");
+    }
+
+    // 下拉框和弹窗保持适中宽度：比之前小，但仍能看清 Back-and-Forth。
+    if (gAngleModeCombo != nullptr) {
+        gAngleModeCombo->setMinimumContentsLength(24);
+        gAngleModeCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+
+        if (gAngleModeCombo->view() != nullptr) {
+            gAngleModeCombo->view()->setMinimumWidth(340);
+        }
     }
 
     QObject::connect(
@@ -1846,12 +1858,28 @@ void setupLedControlFrame(Ui::MainWindow *ui)
     const int paddingTop = 25;
     const int paddingBottom = 25;
 
-    gLedControlFrame->setGeometry(
-        contentRect.left() - paddingLeft,
-        contentRect.top() - paddingTop,
-        contentRect.width() + paddingLeft + paddingRight,
-        contentRect.height() + paddingTop + paddingBottom
-        );
+    const QRect parameterRect = (gParameterFrame != nullptr)
+                                    ? gParameterFrame->geometry()
+                                    : QRect();
+
+    if (parameterRect.isValid()) {
+        // LED 模块右边和 ESTOP 对齐，同时与参数模块顶部/底部对齐。
+        const int targetFrameRight = rightAlignTargetEdge(ui);
+        const int frameWidth = qMax(390, contentRect.width() + paddingLeft + paddingRight);
+        gLedControlFrame->setGeometry(
+            targetFrameRight - frameWidth + 1,
+            parameterRect.top(),
+            frameWidth,
+            parameterRect.height()
+            );
+    } else {
+        gLedControlFrame->setGeometry(
+            contentRect.left() - paddingLeft,
+            contentRect.top() - paddingTop,
+            contentRect.width() + paddingLeft + paddingRight,
+            contentRect.height() + paddingTop + paddingBottom
+            );
+    }
 
     gLedControlFrame->show();
     gLedControlFrame->lower();
@@ -1882,9 +1910,8 @@ void positionLedControlAboveEstop(Ui::MainWindow *ui)
     const int frameWidth = 390;
     const int targetFrameLeft = targetFrameRight - frameWidth + 1;
 
-    // 比参数区顶部稍微往下，避免看起来贴得太高。
-    const int ledDownOffset = 25;
-    const int targetFrameTop = parameterRect.top() + ledDownOffset;
+    // LED 模块和参数模块上下对齐：顶部一致，外框高度在 setupLedControlFrame() 中保持一致。
+    const int targetFrameTop = parameterRect.top();
 
     const int contentLeft = targetFrameLeft + paddingLeft;
     const int contentTop = targetFrameTop + paddingTop;
@@ -2009,7 +2036,7 @@ void positionSendAngleBlockBottomRight(Ui::MainWindow *ui)
     int buttonY = currentButtonRect.top() + 45;
 
     if (gParameterFrame != nullptr) {
-        buttonY = qMax(buttonY, gParameterFrame->geometry().bottom() + 38);
+        buttonY = qMax(buttonY, gParameterFrame->geometry().bottom() + 24);
     }
 
     const int comboHeight = (gAngleModeCombo != nullptr && gAngleModeCombo->height() > 0)
@@ -2028,9 +2055,10 @@ void positionSendAngleBlockBottomRight(Ui::MainWindow *ui)
 
     const int comboY = buttonY + buttonHeight + 10;
     const int labelWidth = 70;
+    // 下拉框调小一点，保持够用但不占太宽。
     const int comboWidth = (gAngleModeCombo != nullptr && gAngleModeCombo->width() > 0)
-                               ? qMax(200, gAngleModeCombo->width())
-                               : 200;
+                               ? qMax(300, qMin(gAngleModeCombo->width(), 340))
+                               : 300;
 
     if (gAngleModeLabel != nullptr) {
         gAngleModeLabel->setGeometry(buttonX, comboY, labelWidth, comboHeight);
@@ -2135,7 +2163,7 @@ void positionStatusLogLeftAlignedWithWifi(Ui::MainWindow *ui)
                                ? gConnectionFrame->geometry()
                                : QRect(20, 80, 800, 140);
 
-    const int gapBetweenModules = 5;
+    const int gapBetweenModules = 16;
     const int padding = 12;
     const int labelToLogGap = 8;
 
@@ -2444,7 +2472,8 @@ void positionMotorAngleBlockBelowParameter(Ui::MainWindow *ui)
                                     ? gParameterFrame->geometry()
                                     : QRect(contentRect.left(), 520, contentRect.width(), 260);
 
-    const int gap = 28;
+    // 缩小参数模块和 Send Angle 模块的垂直距离，保证底部完整显示。
+    const int gap = 30;
     const int targetTop = parameterRect.bottom() + gap;
 
     moveWidgetsBy(widgets, 0, targetTop - contentRect.top());
@@ -2566,6 +2595,10 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+
+    // 给新布局多一点高度，避免底部 Send Angle / Mode 下拉框被窗口裁掉。
+    setMinimumSize(1420, 1020);
+    resize(qMax(width(), 1420), qMax(height(), 1020));
 
     QLabel *colorPreviewTextLabel =
         findLabelContainsText(ui->centralwidget, QStringList() << "Color Preview");
