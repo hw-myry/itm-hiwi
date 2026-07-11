@@ -575,39 +575,36 @@ void positionEstopRestartTopRight(Ui::MainWindow *ui)
 
     QWidget *parent = ui->centralwidget;
 
-    // 正方形按钮：上下排列，ESTOP 在上方，Restart ESP32 在下方。
+    // 右上角横向排列：User TXT 在最左，Restart ESP32 在中间，ESTOP 保持原来的右上角位置。
     const int buttonSize = 120;
     const int gap = 18;
-    const int marginRight = 55;
+    const int marginRight = 35;
+    const int marginTop = 25;
 
     const QRect wifiRect = (gConnectionFrame != nullptr)
                                ? gConnectionFrame->geometry()
                                : QRect(20, 40, 800, 140);
 
-    // 优先放在窗口右上角；如果构造函数阶段 parent->width() 还没准备好，
-    // 就至少放到 Wi-Fi 模块右侧，避免覆盖 Wi-Fi / LED 区域。
-    int x = parent->width() - marginRight - buttonSize;
-    const int minX = wifiRect.right() + 35;
+    // ESTOP 的位置保持不变：仍然贴近右上角。
+    int estopX = parent->width() - marginRight - buttonSize;
 
-    if (parent->width() <= minX + buttonSize || x < minX) {
-        x = minX;
+    // 如果窗口宽度还没有初始化完成，至少放到 Wi-Fi 框右边，避免盖住 Wi-Fi 区域。
+    const int minEstopX = wifiRect.right() + 35;
+    if (parent->width() <= minEstopX + buttonSize || estopX < minEstopX) {
+        estopX = minEstopX;
     }
 
-    const int moveDown = 500;   // 改这里：数值越大，两个按钮越往下
-
-    int y = qMax(25, wifiRect.top()) + moveDown;
-
-    // 新增 User TXT 按钮：默认放在 ESTOP 上方，不改变 ESTOP / Restart 的现有位置。
-    // userMoveUp 数值越大，User TXT 按钮越往上。
-    const int userMoveUp = 450;
-    int userY = y - buttonSize - gap - userMoveUp;
-    if (userY < 20) {
-        userY = 20;
+    int topY = marginTop;
+    if (topY < 20) {
+        topY = 20;
     }
 
-    gOpenUserFileButton->setGeometry(x, userY, buttonSize, buttonSize);
-    gEstopButton->setGeometry(x, y, buttonSize, buttonSize);
-    gRestartEsp32Button->setGeometry(x, y + buttonSize + gap, buttonSize, buttonSize);
+    const int restartX = estopX - gap - buttonSize;
+    const int userX = restartX - gap - buttonSize;
+
+    gOpenUserFileButton->setGeometry(userX, topY, buttonSize, buttonSize);
+    gRestartEsp32Button->setGeometry(restartX, topY, buttonSize, buttonSize);
+    gEstopButton->setGeometry(estopX, topY, buttonSize, buttonSize);
 
     gOpenUserFileButton->setMinimumSize(buttonSize, buttonSize);
     gOpenUserFileButton->setMaximumSize(buttonSize, buttonSize);
@@ -620,13 +617,13 @@ void positionEstopRestartTopRight(Ui::MainWindow *ui)
     gOpenUserFileButton->setText("User\nTXT");
     gRestartEsp32Button->setText("Restart\nESP32");
 
-    gOpenUserFileButton->show();
     gEstopButton->show();
     gRestartEsp32Button->show();
+    gOpenUserFileButton->show();
 
-    gOpenUserFileButton->raise();
     gEstopButton->raise();
     gRestartEsp32Button->raise();
+    gOpenUserFileButton->raise();
 }
 
 void setupRestartEsp32Button(Ui::MainWindow *ui, QWidget *parent)
