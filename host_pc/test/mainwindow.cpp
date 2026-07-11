@@ -30,6 +30,8 @@
 #include <QtGlobal>
 #include <QFrame>
 #include <QPixmap>
+#include <QSlider>
+#include <functional>
 
 // =====================================================
 // Motor send-angle state
@@ -75,6 +77,17 @@ QFrame *gStatusLogFrame = nullptr;  // Status Log 边框
 QFrame *gLedControlFrame = nullptr; // LED Control 边框
 QFrame *gParameterFrame = nullptr;  // PID / Speed / Angle Limit 参数边框
 QFrame *gAngleControlFrame = nullptr; // Motor Angle / Send Angle 区域边框
+QLabel *gMiddleImageLabel = nullptr; // 参数模块和 LED 模块中间的图片接口
+
+QPushButton *gLedToggleButton = nullptr;
+QSlider *gLedSliderR = nullptr;
+QSlider *gLedSliderG = nullptr;
+QSlider *gLedSliderB = nullptr;
+QLabel *gLedColorPreview = nullptr;
+QTimer *gEstopLedFlashTimer = nullptr;
+bool gEstopLedFlashRedPhase = true;
+std::function<void()> gEstopLedFlashStep;
+std::function<void()> gEstopLedFlashStop;
 
 // =====================================================
 // Whole-window linear scaling state
@@ -376,9 +389,54 @@ void setupSendAngleStatusLabel(Ui::MainWindow *ui, QWidget *parent)
     gSendAngleStatusLabel->raise();
 }
 
+void setLedControlWidgetsEnabled(bool enabled)
+{
+    if (gLedToggleButton != nullptr) {
+        gLedToggleButton->setEnabled(enabled);
+        gLedToggleButton->setToolTip(enabled
+                                         ? "Toggle RGB LED."
+                                         : "LED control is disabled while ESTOP is active.");
+    }
+
+    if (gLedSliderR != nullptr) {
+        gLedSliderR->setEnabled(enabled);
+    }
+
+    if (gLedSliderG != nullptr) {
+        gLedSliderG->setEnabled(enabled);
+    }
+
+    if (gLedSliderB != nullptr) {
+        gLedSliderB->setEnabled(enabled);
+    }
+}
+
 void setEstopButtonState(bool active)
 {
+    const bool wasActive = gEstopActive;
     gEstopActive = active;
+
+    if (active) {
+        setLedControlWidgetsEnabled(false);
+
+        if (!wasActive) {
+            gEstopLedFlashRedPhase = true;
+
+            if (gEstopLedFlashStep) {
+                gEstopLedFlashStep();
+            }
+
+            if (gEstopLedFlashTimer != nullptr) {
+                gEstopLedFlashTimer->start();
+            }
+        }
+    } else {
+        if (wasActive && gEstopLedFlashStop) {
+            gEstopLedFlashStop();
+        }
+
+        setLedControlWidgetsEnabled(true);
+    }
 
     if (gEstopButton == nullptr) {
         return;
@@ -567,7 +625,7 @@ void positionEstopRestartTopRight(Ui::MainWindow *ui)
     // 右上角横向排列：User TXT 在最左，Restart ESP32 在中间，ESTOP 保持原来的右上角位置。
     const int buttonSize = 120;
     const int gap = 18;
-    const int userGroupGap = 58;  // User TXT 再往左一些，和 Restart / ESTOP 这一组拉开距离。
+    const int userGroupGap = 100; // User TXT 再往左一些，和 Restart / ESTOP 这一组拉开距离。
     const int marginRight = 35;
     const int marginTop = 25;
 
@@ -1227,6 +1285,10 @@ void applyUiScale(Ui::MainWindow *ui)
         gAngleControlFrame->lower();
     }
 
+    if (gMiddleImageLabel != nullptr) {
+        gMiddleImageLabel->raise();
+    }
+
     if (gOpenUserFileButton != nullptr) {
         gOpenUserFileButton->raise();
     }
@@ -1276,6 +1338,9 @@ void positionStatusLogLeftAlignedWithWifi(Ui::MainWindow *ui);
 void positionSendAngleBlockBottomRight(Ui::MainWindow *ui);
 void positionSendAngleStatusLeftOfButton(Ui::MainWindow *ui);
 void setupAngleControlFrame(Ui::MainWindow *ui);
+void shiftInputColumnsRight(Ui::MainWindow *ui);
+void setupMiddleImageInterface(Ui::MainWindow *ui);
+void positionMiddleImageBetweenParameterAndLed(Ui::MainWindow *ui);
 QRect sendAngleAreaReferenceRect(Ui::MainWindow *ui);
 
 
@@ -1345,6 +1410,8 @@ void setupResponsiveScaling(QObject *owner, Ui::MainWindow *ui)
 
         positionLedControlAboveEstop(ui);
         setupLedControlFrame(ui);
+        setupMiddleImageInterface(ui);
+        positionMiddleImageBetweenParameterAndLed(ui);
         positionStatusLogLeftAlignedWithWifi(ui);
 
         // applyModeFontToAllWidgets(ui);
@@ -1891,6 +1958,118 @@ void setupLedControlFrame(Ui::MainWindow *ui)
     }
 }
 
+void refreshMiddleImagePixmap()
+{
+    if (gMiddleImageLabel == nullptr) {
+        return;
+    }
+
+    const QString imagePath = gMiddleImageLabel->property("middleImagePath").toString();
+    const QFileInfo imageInfo(imagePath);
+
+    if (!imagePath.isEmpty() && imageInfo.exists() && imageInfo.isFile()) {
+        QPixmap pixmap(imageInfo.absoluteFilePath());
+
+        if (!pixmap.isNull()) {
+            gMiddleImageLabel->setText("");
+            gMiddleImageLabel->setStyleSheet(
+                "QLabel#middleImageLabel {"
+                " background-color: white;"
+                " border: 2px solid #34495e;"
+                " border-radius: 8px;"
+                "}"
+                );
+            gMiddleImageLabel->setPixmap(pixmap);
+            return;
+        }
+    }
+
+    // 没有图片文件时显示占位框。之后把 middle_image.png 放到 exe 同目录即可自动显示。
+    gMiddleImageLabel->setPixmap(QPixmap());
+    gMiddleImageLabel->setText("IMAGE\nmiddle_image.png");
+    gMiddleImageLabel->setStyleSheet(
+        "QLabel#middleImageLabel {"
+        " background-color: #ffffff;"
+        " color: #7f8c8d;"
+        " border: 2px dashed #95a5a6;"
+        " border-radius: 8px;"
+        "}"
+        );
+}
+
+void setupMiddleImageInterface(Ui::MainWindow *ui)
+{
+    if (ui == nullptr || ui->centralwidget == nullptr) {
+        return;
+    }
+
+    QWidget *parent = ui->centralwidget;
+
+    gMiddleImageLabel = parent->findChild<QLabel *>("middleImageLabel");
+
+    if (gMiddleImageLabel == nullptr) {
+        gMiddleImageLabel = new QLabel(parent);
+        gMiddleImageLabel->setObjectName("middleImageLabel");
+    }
+
+    gMiddleImageLabel->setAlignment(Qt::AlignCenter);
+    gMiddleImageLabel->setWordWrap(true);
+    gMiddleImageLabel->setScaledContents(true);
+    gMiddleImageLabel->setToolTip(
+        "Image interface: put middle_image.png in the same folder as the executable, "
+        "or change the middleImagePath property in code."
+        );
+
+    // 默认接口：程序 exe 同目录下放 middle_image.png 即可显示。
+    const QString defaultImagePath = QCoreApplication::applicationDirPath() + "/middle_image.png";
+    gMiddleImageLabel->setProperty("middleImagePath", defaultImagePath);
+
+    refreshMiddleImagePixmap();
+    gMiddleImageLabel->show();
+    gMiddleImageLabel->raise();
+}
+
+void positionMiddleImageBetweenParameterAndLed(Ui::MainWindow *ui)
+{
+    if (ui == nullptr ||
+        ui->centralwidget == nullptr ||
+        gMiddleImageLabel == nullptr ||
+        gParameterFrame == nullptr ||
+        gLedControlFrame == nullptr) {
+        return;
+    }
+
+    const QRect parameterRect = gParameterFrame->geometry();
+    const QRect ledRect = gLedControlFrame->geometry();
+
+    if (!parameterRect.isValid() || !ledRect.isValid()) {
+        return;
+    }
+
+    const int sideGap = 22;
+    const int imageLeft = parameterRect.right() + sideGap;
+    const int imageRight = ledRect.left() - sideGap;
+
+    if (imageRight <= imageLeft + 40) {
+        gMiddleImageLabel->hide();
+        return;
+    }
+
+    // 图片接口和参数模块 / LED 模块上下对齐，中间左右留一点空隙。
+    gMiddleImageLabel->setGeometry(
+        imageLeft,
+        parameterRect.top(),
+        imageRight - imageLeft + 1,
+        parameterRect.height()
+        );
+
+    refreshMiddleImagePixmap();
+    gMiddleImageLabel->show();
+    gMiddleImageLabel->raise();
+}
+
+
+
 void positionLedControlAboveEstop(Ui::MainWindow *ui)
 {
     if (ui == nullptr || ui->centralwidget == nullptr || ui->btnLedOn == nullptr) {
@@ -2310,6 +2489,94 @@ void arrangeSpeedAndAngleLimitUnderKd(Ui::MainWindow *ui)
     }
 }
 
+void shiftInputColumnsRight(Ui::MainWindow *ui)
+{
+    if (ui == nullptr || ui->centralwidget == nullptr) {
+        return;
+    }
+
+    // 给左侧标签留更多空间：Current Angle 不会再被输入框挡住。
+    // 只执行一次，避免 resize / 二次排版时重复右移。
+    const int shiftRightPx = 70;
+
+    auto moveOnce = [shiftRightPx](QWidget *w) {
+        if (w == nullptr || w->property("inputColumnShiftedRight").toBool()) {
+            return;
+        }
+
+        QRect r = w->geometry();
+        r.translate(shiftRightPx, 0);
+        w->setGeometry(r);
+        w->setProperty("inputColumnShiftedRight", true);
+    };
+
+    moveOnce(ui->kpEdit);
+    moveOnce(ui->kiEdit);
+    moveOnce(ui->kdEdit);
+    moveOnce(ui->speedEdit);
+    moveOnce(gAbsAngleLimitEdit);
+    moveOnce(gSpeedUnitLabel);
+
+    // Motor Angle / Current Angle 的输入框也右移，给标签留完整显示宽度。
+    moveOnce(ui->angleEdit);
+    moveOnce(ui->currentAngleEdit);
+
+    QLabel *motorAngleLabel =
+        findLabelContainsText(ui->centralwidget, QStringList() << "Motor Angle");
+    QLabel *currentAngleLabel =
+        findLabelContainsText(ui->centralwidget, QStringList() << "Current Angle");
+
+    // 让参数模块左侧文字和 Motor Angle / Current Angle 左侧文字对齐。
+    // 输入框已经右移，所以这里不再动输入框，只把 KP/KI/KD/Speed/Angle Limit 标签左对齐。
+    const int alignedLabelX = (motorAngleLabel != nullptr)
+                                  ? motorAngleLabel->geometry().left()
+                                  : 56;
+
+    auto alignParameterLabelBeforeEdit = [alignedLabelX](QLabel *label, QLineEdit *edit) {
+        if (label == nullptr || edit == nullptr) {
+            return;
+        }
+
+        QRect labelRect = label->geometry();
+        labelRect.moveLeft(alignedLabelX);
+        labelRect.setWidth(qMax(labelRect.width(), edit->geometry().left() - alignedLabelX - 12));
+        label->setGeometry(labelRect);
+        label->show();
+        label->raise();
+    };
+
+    alignParameterLabelBeforeEdit(findLabelExactText(ui->centralwidget, "KP"), ui->kpEdit);
+    alignParameterLabelBeforeEdit(findLabelExactText(ui->centralwidget, "KI"), ui->kiEdit);
+    alignParameterLabelBeforeEdit(findLabelExactText(ui->centralwidget, "KD"), ui->kdEdit);
+    alignParameterLabelBeforeEdit(findLabelContainsText(ui->centralwidget, QStringList() << "Speed"), ui->speedEdit);
+    alignParameterLabelBeforeEdit(gAbsAngleLimitLabel != nullptr
+                                      ? gAbsAngleLimitLabel
+                                      : findLabelContainsText(ui->centralwidget, QStringList() << "Abs Angle"),
+                                  gAbsAngleLimitEdit);
+
+    auto widenLabelBeforeEdit = [](QLabel *label, QLineEdit *edit) {
+        if (label == nullptr || edit == nullptr) {
+            return;
+        }
+
+        QRect labelRect = label->geometry();
+        const int availableWidth = edit->geometry().left() - labelRect.left() - 12;
+
+        if (availableWidth > labelRect.width()) {
+            labelRect.setWidth(availableWidth);
+            label->setGeometry(labelRect);
+        }
+
+        label->show();
+        label->raise();
+    };
+
+    widenLabelBeforeEdit(motorAngleLabel, ui->angleEdit);
+    widenLabelBeforeEdit(currentAngleLabel, ui->currentAngleEdit);
+}
+
+
+
 void positionParameterBlockUpAndSaveButton(Ui::MainWindow *ui)
 {
     if (ui == nullptr || ui->centralwidget == nullptr) {
@@ -2424,10 +2691,19 @@ void setupParameterFrame(Ui::MainWindow *ui)
     const int paddingTop = 22;
     const int paddingBottom = 22;
 
+    int frameLeft = contentRect.left() - paddingLeft;
+    QLabel *motorAngleLabel = findLabelContainsText(parent, QStringList() << "Motor Angle");
+
+    if (motorAngleLabel != nullptr) {
+        frameLeft = qMin(frameLeft, motorAngleLabel->geometry().left() - paddingLeft);
+    }
+
+    const int frameRight = contentRect.right() + paddingRight;
+
     gParameterFrame->setGeometry(
-        contentRect.left() - paddingLeft,
+        frameLeft,
         contentRect.top() - paddingTop,
-        contentRect.width() + paddingLeft + paddingRight,
+        frameRight - frameLeft + 1,
         contentRect.height() + paddingTop + paddingBottom
         );
 
@@ -2627,6 +2903,12 @@ MainWindow::MainWindow(QWidget *parent)
     ui->btnLedOff->hide();
     ui->btnLedOff->setEnabled(false);
 
+    gLedToggleButton = ui->btnLedOn;
+    gLedSliderR = ui->sliderR;
+    gLedSliderG = ui->sliderG;
+    gLedSliderB = ui->sliderB;
+    gLedColorPreview = ui->colorPreview;
+
     moveConnectionBlockUp(ui, 30);   // 数字越大，整体越往上
     setupConnectionFrame(ui);        // 重新计算外框位置
 
@@ -2651,6 +2933,70 @@ MainWindow::MainWindow(QWidget *parent)
 
     socket = new QTcpSocket(this);
 
+    // ESTOP 后 LED 自动红色闪烁：红 -> 灭 -> 红 -> 灭，直到 UNLOCK ESTOP。
+    gEstopLedFlashTimer = new QTimer(this);
+    gEstopLedFlashTimer->setInterval(500);
+
+    gEstopLedFlashStep = [=]() {
+        if (!gEstopActive || socket->state() != QAbstractSocket::ConnectedState) {
+            return;
+        }
+
+        if (gEstopLedFlashRedPhase) {
+            sendCommand("LED_ON", false);
+            if (gLastCommandWriteOk) {
+                sendCommand("RGB:255,0,0", false);
+            }
+
+            if (ui->colorPreview != nullptr) {
+                ui->colorPreview->setStyleSheet(
+                    "background-color: rgb(255,0,0);"
+                    "border: 2px solid gray;"
+                    );
+            }
+        } else {
+            sendCommand("LED_OFF", false);
+
+            if (ui->colorPreview != nullptr) {
+                ui->colorPreview->setStyleSheet(
+                    "background-color: black;"
+                    "border: 2px solid gray;"
+                    );
+            }
+        }
+
+        gEstopLedFlashRedPhase = !gEstopLedFlashRedPhase;
+    };
+
+    gEstopLedFlashStop = [=]() {
+        if (gEstopLedFlashTimer != nullptr) {
+            gEstopLedFlashTimer->stop();
+        }
+
+        gEstopLedFlashRedPhase = true;
+
+        if (socket->state() == QAbstractSocket::ConnectedState) {
+            sendCommand("LED_OFF", false);
+        }
+
+        ledOn = false;
+        ui->btnLedOn->setText("LED ON");
+        ui->btnLedOn->setStyleSheet(GREEN_BUTTON_STYLE);
+
+        if (ui->colorPreview != nullptr) {
+            ui->colorPreview->setStyleSheet(
+                "background-color: black;"
+                "border: 2px solid gray;"
+                );
+        }
+    };
+
+    connect(gEstopLedFlashTimer, &QTimer::timeout, this, [=]() {
+        if (gEstopLedFlashStep) {
+            gEstopLedFlashStep();
+        }
+    });
+
     // =====================================================
     // Default IP and port
     // =====================================================
@@ -2671,6 +3017,9 @@ MainWindow::MainWindow(QWidget *parent)
     ui->speedEdit->setText("500");
     setupAbsAngleLimitEditor(ui);
     setupSpeedUnitLabel(ui);
+
+    // 输入框列整体右移，给左侧标签（尤其 Current Angle）留完整显示空间。
+    shiftInputColumnsRight(ui);
 
     // CPR 和 Tolerance 由 ESP32 固件固定/默认处理，上位机不再显示和保存这两个参数。
     hideParameterEditor(findChild<QWidget *>("CPREdit"), QStringList() << "CPR" << "Encoder CPR" << "Encoder");
@@ -2704,6 +3053,8 @@ MainWindow::MainWindow(QWidget *parent)
     setupAngleControlFrame(ui);
     positionLedControlAboveEstop(ui);
     setupLedControlFrame(ui);
+    setupMiddleImageInterface(ui);
+    positionMiddleImageBetweenParameterAndLed(ui);
     positionStatusLogLeftAlignedWithWifi(ui);
 
 
@@ -2766,7 +3117,8 @@ MainWindow::MainWindow(QWidget *parent)
             sendCommand("ESTOP", true);
 
             if (gLastCommandWriteOk) {
-                addLog("Emergency stop command sent");
+                setEstopButtonState(true);
+                addLog("Emergency stop command sent. LED control locked and red flashing started.");
             } else {
                 addLog("Emergency stop send failed");
             }
@@ -2947,6 +3299,9 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    gEstopLedFlashStep = nullptr;
+    gEstopLedFlashStop = nullptr;
+    gEstopLedFlashTimer = nullptr;
     delete ui;
 }
 
@@ -3320,6 +3675,12 @@ void MainWindow::on_btnConnect_clicked()
 // =====================================================
 void MainWindow::on_btnLedOn_clicked()
 {
+    if (gEstopActive) {
+        setSendAngleStatusFailed();
+        addLog("ESTOP is active. LED control is locked until UNLOCK ESTOP.");
+        return;
+    }
+
     // LED ON / LED OFF merged into one green toggle button.
     // Same behavior style as Connect:
     //   LED is OFF -> click sends LED_ON and button becomes "LED OFF"
@@ -3357,6 +3718,10 @@ void MainWindow::on_btnLedOff_clicked()
 
 void MainWindow::sendRGB()
 {
+    if (gEstopActive) {
+        return;
+    }
+
     int r = ui->sliderR->value();
     int g = ui->sliderG->value();
     int b = ui->sliderB->value();
