@@ -160,20 +160,25 @@ const char *SEND_ANGLE_SWING_STOPPING_STYLE =
     " color: white;"
     "}";
 
-const char *RESET_ANGLE_BUTTON_STYLE =
+const char *GREEN_BUTTON_STYLE =
     "QPushButton {"
-    " background-color: #9b59b6;"
+    " background-color: #2ecc71;"
     " color: white;"
     " border-radius: 6px;"
     " padding: 6px 12px;"
     "}"
     "QPushButton:hover {"
-    " background-color: #8e44ad;"
+    " background-color: #27ae60;"
+    "}"
+    "QPushButton:pressed {"
+    " background-color: #1e8449;"
     "}"
     "QPushButton:disabled {"
-    " background-color: #bdc3c7;"
+    " background-color: #a5d6a7;"
     " color: white;"
     "}";
+
+const char *RESET_ANGLE_BUTTON_STYLE = GREEN_BUTTON_STYLE;
 
 const char *ESTOP_BUTTON_STYLE =
     "QPushButton {"
@@ -979,8 +984,7 @@ void setupCommText(QWidget *parent)
         "Button Help\n"
         "\n"
         "Connect: connect / disconnect ESP32\n"
-        "LED ON: turn on RGB LED\n"
-        "LED OFF: turn off RGB LED\n"
+        "LED ON/OFF: toggle RGB LED\n"
         "ESTOP: emergency stop motor\n"
         "Restart ESP32: reboot ESP32\n"
         "Send Angle: send motor angle command\n"
@@ -1699,7 +1703,8 @@ QList<QWidget *> ledControlWidgets(Ui::MainWindow *ui)
     };
 
     addWidget(ui->btnLedOn);
-    addWidget(ui->btnLedOff);
+    // LED ON / LED OFF now share one toggle button, so the old OFF button is hidden
+    // and should not affect the LED control frame size or layout.
     addWidget(ui->sliderR);
     addWidget(ui->sliderG);
     addWidget(ui->sliderB);
@@ -2286,24 +2291,7 @@ void positionParameterBlockUpAndSaveButton(Ui::MainWindow *ui)
     ui->btnSaveParameter->setMaximumSize(buttonWidth, buttonHeight);
     ui->btnSaveParameter->setText("Save");
 
-    QString saveStyle = (ui->btnLedOn != nullptr) ? ui->btnLedOn->styleSheet() : QString();
-    if (saveStyle.trimmed().isEmpty()) {
-        saveStyle =
-            "QPushButton {"
-            " background-color: #f8bbd0;"
-            " color: white;"
-            " border-radius: 6px;"
-            " padding: 6px 12px;"
-            "}"
-            "QPushButton:hover {"
-            " background-color: #1f78d1;"
-            "}"
-            "QPushButton:disabled {"
-            " background-color: #9bbce6;"
-            " color: white;"
-            "}";
-    }
-    ui->btnSaveParameter->setStyleSheet(saveStyle);
+    ui->btnSaveParameter->setStyleSheet(GREEN_BUTTON_STYLE);
     ui->btnSaveParameter->show();
     ui->btnSaveParameter->raise();
 }
@@ -2551,6 +2539,16 @@ MainWindow::MainWindow(QWidget *parent)
         " background-color: #f0f4f8;"
         "}"
         );
+
+    // 统一绿色按钮：Connect / LED toggle / Save / Reset Angle Zero
+    ui->btnConnect->setStyleSheet(GREEN_BUTTON_STYLE);
+    ui->btnLedOn->setText(ledOn ? "LED OFF" : "LED ON");
+    ui->btnLedOn->setStyleSheet(GREEN_BUTTON_STYLE);
+
+    // 合并 LED ON / LED OFF：只保留 btnLedOn 作为单个切换按钮。
+    // btnLedOff 不再参与显示、点击和布局计算。
+    ui->btnLedOff->hide();
+    ui->btnLedOff->setEnabled(false);
 
     moveConnectionBlockUp(ui, 30);   // 数字越大，整体越往上
     setupConnectionFrame(ui);        // 重新计算外框位置
@@ -2801,6 +2799,7 @@ MainWindow::MainWindow(QWidget *parent)
         ui->labelConnectStatus->setText("Connected");
         ui->labelConnectStatus->setStyleSheet("color:green;");
         ui->btnConnect->setText("Disconnect");
+        ui->btnConnect->setStyleSheet(GREEN_BUTTON_STYLE);
 
         addLog("Connected to ESP32");
 
@@ -2817,6 +2816,7 @@ MainWindow::MainWindow(QWidget *parent)
         ui->labelConnectStatus->setText("Disconnected");
         ui->labelConnectStatus->setStyleSheet("color:red;");
         ui->btnConnect->setText("Connect");
+        ui->btnConnect->setStyleSheet(GREEN_BUTTON_STYLE);
 
         addLog("Disconnected");
         if (gMotorMoving || gAngleSequenceRunning) {
@@ -3243,20 +3243,39 @@ void MainWindow::on_btnConnect_clicked()
 // =====================================================
 void MainWindow::on_btnLedOn_clicked()
 {
-    ledOn = true;
-    sendCommand("LED_ON");
+    // LED ON / LED OFF merged into one green toggle button.
+    // Same behavior style as Connect:
+    //   LED is OFF -> click sends LED_ON and button becomes "LED OFF"
+    //   LED is ON  -> click sends LED_OFF and button becomes "LED ON"
+    const bool turnOn = !ledOn;
+    sendCommand(turnOn ? "LED_ON" : "LED_OFF");
+
+    // sendCommand() keeps gLastCommandWriteOk=false when disconnected or write failed.
+    // In that case, keep the old LED state and old button text.
+    if (!gLastCommandWriteOk) {
+        return;
+    }
+
+    ledOn = turnOn;
+    ui->btnLedOn->setText(ledOn ? "LED OFF" : "LED ON");
+    ui->btnLedOn->setStyleSheet(GREEN_BUTTON_STYLE);
+
+    if (!ledOn) {
+        ui->colorPreview->setStyleSheet(
+            "background-color: black;"
+            "border: 2px solid gray;"
+            );
+    } else {
+        sendRGB();
+    }
 }
 
 void MainWindow::on_btnLedOff_clicked()
 {
-    ledOn = false;
-
-    sendCommand("LED_OFF");
-
-    ui->colorPreview->setStyleSheet(
-        "background-color: black;"
-        "border: 2px solid gray;"
-        );
+    // The old OFF button is hidden. Keep this slot safe in case it is triggered manually.
+    if (ledOn) {
+        on_btnLedOn_clicked();
+    }
 }
 
 void MainWindow::sendRGB()
