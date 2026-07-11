@@ -194,19 +194,7 @@ const char *ESTOP_BUTTON_STYLE =
     " background-color: #b71c1c;"
     "}";
 
-const char *USER_FILE_BUTTON_STYLE =
-    "QPushButton {"
-    " background-color: #e91e63;"
-    " color: white;"
-    " border-radius: 6px;"
-    " padding: 8px 16px;"
-    "}"
-    "QPushButton:hover {"
-    " background-color: #d81b60;"
-    "}"
-    "QPushButton:pressed {"
-    " background-color: #ad1457;"
-    "}";
+const char *USER_FILE_BUTTON_STYLE = GREEN_BUTTON_STYLE;
 
 const char *ESTOP_UNLOCK_BUTTON_STYLE =
     "QPushButton {"
@@ -2281,7 +2269,8 @@ void positionParameterBlockUpAndSaveButton(Ui::MainWindow *ui)
     const int gap = 35;
 
     const int buttonX = contentRect.right() + gap;
-    const int buttonY = contentRect.top() + (contentRect.height() - buttonHeight) / 2;
+    // Save 放到参数模块右上角：和第一行参数顶部对齐，不再垂直居中。
+    const int buttonY = contentRect.top();
 
     ui->btnSaveParameter->setGeometry(buttonX, buttonY, buttonWidth, buttonHeight);
     ui->btnSaveParameter->setMinimumSize(buttonWidth, buttonHeight);
