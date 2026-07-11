@@ -1735,6 +1735,20 @@ QRect boundingRectForWidgets(const QList<QWidget *> &widgets)
     return result;
 }
 
+
+int rightAlignTargetEdge(Ui::MainWindow *ui)
+{
+    if (gEstopButton != nullptr && gEstopButton->geometry().isValid()) {
+        return gEstopButton->geometry().right();
+    }
+
+    if (ui != nullptr && ui->centralwidget != nullptr && ui->centralwidget->width() > 0) {
+        return ui->centralwidget->width() - 35;
+    }
+
+    return 1380;
+}
+
 QRect sendAngleAreaReferenceRect(Ui::MainWindow *ui)
 {
     if (ui == nullptr || ui->centralwidget == nullptr) {
@@ -1851,51 +1865,92 @@ void setupLedControlFrame(Ui::MainWindow *ui)
 
 void positionLedControlAboveEstop(Ui::MainWindow *ui)
 {
-    if (ui == nullptr || ui->centralwidget == nullptr) {
-        return;
-    }
-
-    const QList<QWidget *> widgets = ledControlWidgets(ui);
-    const QRect contentRect = boundingRectForWidgets(widgets);
-
-    if (!contentRect.isValid()) {
+    if (ui == nullptr || ui->centralwidget == nullptr || ui->btnLedOn == nullptr) {
         return;
     }
 
     const int paddingLeft = 25;
     const int paddingRight = 25;
     const int paddingTop = 25;
-    const int paddingBottom = 25;
-
-    const int frameWidth = contentRect.width() + paddingLeft + paddingRight;
 
     const QRect parameterRect = (gParameterFrame != nullptr)
                                     ? gParameterFrame->geometry()
                                     : QRect(20, 480, 700, 280);
 
-    QRect sendAreaRect = sendAngleAreaReferenceRect(ui);
-    int targetFrameRight = sendAreaRect.isValid()
-                               ? sendAreaRect.right()
-                               : parameterRect.right() + 500;
-
-    // 以最下方 Send Angle 整体区域的右边框为准：
-    // LED 框的右边框 = Send 区域右边框。
+    // LED 模块整体向右对齐到 ESTOP 的右边。
+    const int targetFrameRight = rightAlignTargetEdge(ui);
+    const int frameWidth = 390;
     const int targetFrameLeft = targetFrameRight - frameWidth + 1;
 
     // 比参数区顶部稍微往下，避免看起来贴得太高。
     const int ledDownOffset = 25;
     const int targetFrameTop = parameterRect.top() + ledDownOffset;
 
-    const int targetContentLeft = targetFrameLeft + paddingLeft;
-    const int targetContentTop = targetFrameTop + paddingTop;
+    const int contentLeft = targetFrameLeft + paddingLeft;
+    const int contentTop = targetFrameTop + paddingTop;
+    const int contentRight = targetFrameRight - paddingRight;
 
-    Q_UNUSED(paddingBottom);
+    const int buttonWidth = qMax(110, ui->btnLedOn->width());
+    const int buttonHeight = qMax(50, ui->btnLedOn->height());
 
-    moveWidgetsBy(
-        widgets,
-        targetContentLeft - contentRect.left(),
-        targetContentTop - contentRect.top()
+    // LED ON / LED OFF 合并按钮放到 LED 模块右上角。
+    ui->btnLedOn->setGeometry(
+        contentRight - buttonWidth + 1,
+        contentTop,
+        buttonWidth,
+        buttonHeight
         );
+    ui->btnLedOn->show();
+    ui->btnLedOn->raise();
+
+    if (ui->btnLedOff != nullptr) {
+        ui->btnLedOff->hide();
+        ui->btnLedOff->setEnabled(false);
+    }
+
+    QLabel *rLabel = findLabelExactText(ui->centralwidget, "R");
+    QLabel *gLabel = findLabelExactText(ui->centralwidget, "G");
+    QLabel *bLabel = findLabelExactText(ui->centralwidget, "B");
+
+    const int labelWidth = 28;
+    const int labelHeight = 24;
+    const int sliderHeight = (ui->sliderR != nullptr && ui->sliderR->height() > 0)
+                                 ? ui->sliderR->height()
+                                 : 22;
+    const int sliderX = contentLeft + labelWidth + 8;
+    const int sliderWidth = qMax(130, ui->btnLedOn->geometry().left() - sliderX - 28);
+    const int rowGap = 38;
+    const int firstRowY = contentTop + 10;
+
+    auto placeLedRow = [&](QLabel *label, QSlider *slider, int row) {
+        const int y = firstRowY + row * rowGap;
+
+        if (label != nullptr) {
+            label->setGeometry(contentLeft, y - 2, labelWidth, labelHeight);
+            label->show();
+            label->raise();
+        }
+
+        if (slider != nullptr) {
+            slider->setGeometry(sliderX, y, sliderWidth, sliderHeight);
+            slider->show();
+            slider->raise();
+        }
+    };
+
+    placeLedRow(rLabel, ui->sliderR, 0);
+    placeLedRow(gLabel, ui->sliderG, 1);
+    placeLedRow(bLabel, ui->sliderB, 2);
+
+    if (ui->colorPreview != nullptr) {
+        const int previewSize = qMax(40, qMax(ui->colorPreview->width(), ui->colorPreview->height()));
+        const int previewX = sliderX + (sliderWidth - previewSize) / 2;
+        const int previewY = firstRowY + rowGap * 3 + 15;
+
+        ui->colorPreview->setGeometry(previewX, previewY, previewSize, previewSize);
+        ui->colorPreview->show();
+        ui->colorPreview->raise();
+    }
 }
 
 void positionSendAngleStatusLeftOfButton(Ui::MainWindow *ui)
@@ -2044,10 +2099,16 @@ void setupAngleControlFrame(Ui::MainWindow *ui)
     const int paddingTop = 22;
     const int paddingBottom = 22;
 
+    const int frameLeft = contentRect.left() - paddingLeft;
+    const int frameTop = contentRect.top() - paddingTop;
+    const int naturalFrameRight = contentRect.right() + paddingRight;
+    const int targetFrameRight = qMax(naturalFrameRight, rightAlignTargetEdge(ui));
+
+    // Send Angle 模块向右拉长，右边和 LED / ESTOP 对齐。
     gAngleControlFrame->setGeometry(
-        contentRect.left() - paddingLeft,
-        contentRect.top() - paddingTop,
-        contentRect.width() + paddingLeft + paddingRight,
+        frameLeft,
+        frameTop,
+        targetFrameRight - frameLeft + 1,
         contentRect.height() + paddingTop + paddingBottom
         );
 
@@ -2078,13 +2139,10 @@ void positionStatusLogLeftAlignedWithWifi(Ui::MainWindow *ui)
     const int padding = 12;
     const int labelToLogGap = 8;
 
-    // 左边保持和 Wi-Fi 区域对齐，右边拉到和最下方 Send Angle 整体区域右边框对齐。
+    // 左边保持和 Wi-Fi 区域对齐，右边拉长到 ESTOP 的右边。
     const int frameLeft = wifiRect.left();
 
-    QRect sendAreaRect = sendAngleAreaReferenceRect(ui);
-    int frameRight = sendAreaRect.isValid()
-                         ? sendAreaRect.right()
-                         : wifiRect.right();
+    int frameRight = rightAlignTargetEdge(ui);
 
     if (frameRight - frameLeft < 420) {
         frameRight = wifiRect.right();
