@@ -75,9 +75,12 @@ QLabel *gWifiIconLabel = nullptr;
 QLabel *gWifiTitleLabel = nullptr;
 QFrame *gStatusLogFrame = nullptr;  // Status Log 边框
 QFrame *gLedControlFrame = nullptr; // LED Control 边框
-QFrame *gParameterFrame = nullptr;  // PID / Speed / Angle Limit 参数边框
+QFrame *gParameterFrame = nullptr;  // 参数模块整体参考区域（无边框，只用于排版基准）
+QFrame *gPidParameterFrame = nullptr;  // KP / KI / KD 参数边框
+QFrame *gSpeedLimitParameterFrame = nullptr; // Speed / Angle Limit 参数边框
 QFrame *gAngleControlFrame = nullptr; // Motor Angle / Send Angle 区域边框
 QLabel *gMiddleImageLabel = nullptr; // 参数模块和 LED 模块中间的图片接口
+QLabel *gTopImageLabel = nullptr;    // User TXT 和 Restart ESP32 中间的图片接口
 
 QPushButton *gLedToggleButton = nullptr;
 QSlider *gLedSliderR = nullptr;
@@ -613,6 +616,131 @@ void setupEstopButton(Ui::MainWindow *ui, QWidget *parent)
     setEstopButtonState(gEstopActive);
 }
 
+
+void refreshTopMiddleImagePixmap()
+{
+    if (gTopImageLabel == nullptr) {
+        return;
+    }
+
+    const QString imagePath = gTopImageLabel->property("topMiddleImagePath").toString();
+    const QFileInfo imageInfo(imagePath);
+
+    if (!imagePath.isEmpty() && imageInfo.exists() && imageInfo.isFile()) {
+        QPixmap pixmap(imageInfo.absoluteFilePath());
+
+        if (!pixmap.isNull()) {
+            gTopImageLabel->setText("");
+            gTopImageLabel->setStyleSheet(
+                "QLabel#topMiddleImageLabel {"
+                " background-color: white;"
+                " border: 2px solid #34495e;"
+                " border-radius: 8px;"
+                "}"
+                );
+
+            // 和 LOGO 一样：保持比例，不拉伸变形。
+            if (gTopImageLabel->width() > 0 && gTopImageLabel->height() > 0) {
+                gTopImageLabel->setPixmap(
+                    pixmap.scaled(gTopImageLabel->size(),
+                                  Qt::KeepAspectRatio,
+                                  Qt::SmoothTransformation)
+                    );
+            } else {
+                gTopImageLabel->setPixmap(pixmap);
+            }
+            return;
+        }
+    }
+
+    // 没有图片文件时显示占位框。把 top_middle_image.png 放到 exe 同目录即可自动显示。
+    gTopImageLabel->setPixmap(QPixmap());
+    gTopImageLabel->setText("IMAGE\ntop_middle_image.png");
+    gTopImageLabel->setStyleSheet(
+        "QLabel#topMiddleImageLabel {"
+        " background-color: #ffffff;"
+        " color: #7f8c8d;"
+        " border: 2px dashed #95a5a6;"
+        " border-radius: 8px;"
+        "}"
+        );
+}
+
+void setupTopMiddleImageInterface(Ui::MainWindow *ui, QWidget *parent)
+{
+    if (ui == nullptr || parent == nullptr) {
+        return;
+    }
+
+    gTopImageLabel = parent->findChild<QLabel *>("topMiddleImageLabel");
+
+    if (gTopImageLabel == nullptr) {
+        gTopImageLabel = new QLabel(parent);
+        gTopImageLabel->setObjectName("topMiddleImageLabel");
+    }
+
+    gTopImageLabel->setAlignment(Qt::AlignCenter);
+    gTopImageLabel->setWordWrap(true);
+    gTopImageLabel->setScaledContents(false);
+    gTopImageLabel->setToolTip(
+        "Top image interface: put top_middle_image.png in the same folder as the executable, "
+        "or change the topMiddleImagePath property in code."
+        );
+
+    // 默认接口：程序 exe 同目录下放 top_middle_image.png 即可显示。
+    const QString defaultImagePath =
+        QCoreApplication::applicationDirPath() + "/top_middle_image.png";
+    gTopImageLabel->setProperty("topMiddleImagePath", defaultImagePath);
+
+    refreshTopMiddleImagePixmap();
+    gTopImageLabel->show();
+    gTopImageLabel->raise();
+}
+
+void positionTopMiddleImageBetweenUserAndRestart()
+{
+    if (gTopImageLabel == nullptr ||
+        gOpenUserFileButton == nullptr ||
+        gRestartEsp32Button == nullptr) {
+        return;
+    }
+
+    const QRect userRect = gOpenUserFileButton->geometry();
+    const QRect restartRect = gRestartEsp32Button->geometry();
+
+    if (!userRect.isValid() || !restartRect.isValid()) {
+        return;
+    }
+
+    const int sideGap = 18;
+    const int availableWidth = restartRect.left() - userRect.right() - sideGap * 2;
+
+    if (availableWidth < 80) {
+        gTopImageLabel->hide();
+        return;
+    }
+
+    // 顶部图片做窄一点，避免为了塞图片把 User TXT 挤到 Wi-Fi 外框里。
+    const int maxImageWidth = 110;
+    const int imageWidth = qMin(maxImageWidth, availableWidth);
+    const int imageLeft = userRect.right() + sideGap + (availableWidth - imageWidth) / 2;
+
+    // 高度仍然跟按钮一致，图片内容按 KeepAspectRatio 缩放，不会变形。
+    const int imageHeight = qMin(userRect.height(), 120);
+    const int imageY = userRect.top() + (userRect.height() - imageHeight) / 2;
+
+    gTopImageLabel->setGeometry(
+        imageLeft,
+        imageY,
+        imageWidth,
+        imageHeight
+        );
+
+    refreshTopMiddleImagePixmap();
+    gTopImageLabel->show();
+    gTopImageLabel->raise();
+}
+
 void positionEstopRestartTopRight(Ui::MainWindow *ui)
 {
     if (ui == nullptr ||
@@ -628,7 +756,8 @@ void positionEstopRestartTopRight(Ui::MainWindow *ui)
     // 右上角横向排列：User TXT 在最左，Restart ESP32 在中间，ESTOP 保持原来的右上角位置。
     const int buttonSize = 120;
     const int gap = 18;
-    const int userGroupGap = 100; // User TXT 再往左一些，和 Restart / ESTOP 这一组拉开距离。
+    const int topImageWidth = 110; // 顶部图片继续做窄，避免 User TXT 撞到 Wi-Fi 外框。
+    const int topImageGap = 18;
     const int marginRight = 35;
     const int marginTop = 25;
 
@@ -651,11 +780,20 @@ void positionEstopRestartTopRight(Ui::MainWindow *ui)
     }
 
     const int restartX = estopX - gap - buttonSize;
-    const int userX = restartX - userGroupGap - buttonSize;
+    int userX = restartX - topImageGap - topImageWidth - topImageGap - buttonSize;
+
+    // User TXT 最小也要离开 Wi-Fi 外框一点，宁愿图片变窄 / 隐藏，也不压到 Wi-Fi 边框。
+    const int minUserX = wifiRect.right() + 35;
+    if (userX < minUserX) {
+        userX = minUserX;
+    }
 
     gOpenUserFileButton->setGeometry(userX, topY, buttonSize, buttonSize);
     gRestartEsp32Button->setGeometry(restartX, topY, buttonSize, buttonSize);
     gEstopButton->setGeometry(estopX, topY, buttonSize, buttonSize);
+
+    // User TXT 和 Restart ESP32 中间图片位。
+    positionTopMiddleImageBetweenUserAndRestart();
 
     gOpenUserFileButton->setMinimumSize(buttonSize, buttonSize);
     gOpenUserFileButton->setMaximumSize(buttonSize, buttonSize);
@@ -671,6 +809,10 @@ void positionEstopRestartTopRight(Ui::MainWindow *ui)
     gEstopButton->show();
     gRestartEsp32Button->show();
     gOpenUserFileButton->show();
+
+    if (gTopImageLabel != nullptr && gTopImageLabel->isVisible()) {
+        gTopImageLabel->raise();
+    }
 
     gEstopButton->raise();
     gRestartEsp32Button->raise();
@@ -892,6 +1034,7 @@ void setupAngleModeCombo(Ui::MainWindow *ui)
     setupEstopButton(ui, parent);
     setupRestartEsp32Button(ui, parent);
     setupOpenUserFileButton(ui, parent);
+    setupTopMiddleImageInterface(ui, parent);
 
     // If you later add a combo box with objectName=angleModeCombo in Qt Designer,
     // this code will reuse it and will not create a duplicate.
@@ -1284,12 +1427,24 @@ void applyUiScale(Ui::MainWindow *ui)
         gParameterFrame->lower();
     }
 
+    if (gPidParameterFrame != nullptr) {
+        gPidParameterFrame->lower();
+    }
+
+    if (gSpeedLimitParameterFrame != nullptr) {
+        gSpeedLimitParameterFrame->lower();
+    }
+
     if (gAngleControlFrame != nullptr) {
         gAngleControlFrame->lower();
     }
 
     if (gMiddleImageLabel != nullptr) {
         gMiddleImageLabel->raise();
+    }
+
+    if (gTopImageLabel != nullptr) {
+        gTopImageLabel->raise();
     }
 
     if (gOpenUserFileButton != nullptr) {
@@ -1335,6 +1490,14 @@ private:
 // Forward declarations for final layout pass used by setupResponsiveScaling().
 void positionLedControlAboveEstop(Ui::MainWindow *ui);
 void setupLedControlFrame(Ui::MainWindow *ui);
+void setupParameterGroupFrame(QFrame *&frame,
+                              QWidget *parent,
+                              const QString &objectName,
+                              const QList<QWidget *> &widgets,
+                              int paddingLeft = 24,
+                              int paddingRight = 24,
+                              int paddingTop = 18,
+                              int paddingBottom = 18);
 void setupParameterFrame(Ui::MainWindow *ui);
 void positionMotorAngleBlockBelowParameter(Ui::MainWindow *ui);
 void positionStatusLogLeftAlignedWithWifi(Ui::MainWindow *ui);
@@ -1403,6 +1566,7 @@ void setupResponsiveScaling(QObject *owner, Ui::MainWindow *ui)
 
         // 构造函数刚运行时 centralwidget 的真实宽度可能还没准备好，
         // 所以这里再排一次右侧模块，避免 LED / Save / 参数框相互重叠。
+        setupTopMiddleImageInterface(ui, ui->centralwidget);
         positionEstopRestartTopRight(ui);
         setupParameterFrame(ui);
         positionMotorAngleBlockBelowParameter(ui);
@@ -2458,7 +2622,7 @@ void arrangeSpeedAndAngleLimitUnderKd(Ui::MainWindow *ui)
 
     const int labelWidth = qMax(110, editX - labelX - 12);
     const int rowGap = 10;
-    const int sectionGap = 14;
+    const int sectionGap = 42; // 给两个参数外框留出清楚的分隔距离。
 
     const int speedY = kdRect.bottom() + sectionGap;
     const int absY = speedY + editHeight + rowGap;
@@ -2638,6 +2802,64 @@ void positionParameterBlockUpAndSaveButton(Ui::MainWindow *ui)
     ui->btnSaveParameter->raise();
 }
 
+void setupParameterGroupFrame(QFrame *&frame,
+                              QWidget *parent,
+                              const QString &objectName,
+                              const QList<QWidget *> &widgets,
+                              int paddingLeft,
+                              int paddingRight,
+                              int paddingTop,
+                              int paddingBottom)
+{
+    if (parent == nullptr) {
+        return;
+    }
+
+    const QRect contentRect = boundingRectForWidgets(widgets);
+    if (!contentRect.isValid()) {
+        if (frame != nullptr) {
+            frame->hide();
+        }
+        return;
+    }
+
+    if (frame == nullptr) {
+        frame = parent->findChild<QFrame *>(objectName);
+    }
+
+    if (frame == nullptr) {
+        frame = new QFrame(parent);
+        frame->setObjectName(objectName);
+    }
+
+    frame->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    frame->setStyleSheet(
+        QString(
+            "QFrame#%1 {"
+            " background-color: transparent;"
+            " border: 2px solid #34495e;"
+            " border-radius: 10px;"
+            "}"
+            ).arg(objectName)
+        );
+
+    frame->setGeometry(
+        contentRect.left() - paddingLeft,
+        contentRect.top() - paddingTop,
+        contentRect.width() + paddingLeft + paddingRight,
+        contentRect.height() + paddingTop + paddingBottom
+        );
+
+    frame->show();
+    frame->lower();
+
+    for (QWidget *w : widgets) {
+        if (w != nullptr) {
+            w->raise();
+        }
+    }
+}
+
 void setupParameterFrame(Ui::MainWindow *ui)
 {
     if (ui == nullptr || ui->centralwidget == nullptr) {
@@ -2646,6 +2868,8 @@ void setupParameterFrame(Ui::MainWindow *ui)
 
     QWidget *parent = ui->centralwidget;
 
+    // parameterFrame 不画边框，只保存“原来大参数框”的整体范围。
+    // 两个真正显示的框都使用这个范围的 left / right，所以宽度和原来的大框一致。
     gParameterFrame = parent->findChild<QFrame *>("parameterFrame");
 
     if (gParameterFrame == nullptr) {
@@ -2657,64 +2881,148 @@ void setupParameterFrame(Ui::MainWindow *ui)
     gParameterFrame->setStyleSheet(
         "QFrame#parameterFrame {"
         " background-color: transparent;"
-        " border: 2px solid #34495e;"
-        " border-radius: 10px;"
+        " border: none;"
         "}"
         );
 
-    QList<QWidget *> widgets;
+    QList<QWidget *> pidWidgets;
+    QList<QWidget *> speedLimitWidgets;
+    QList<QWidget *> originalWidthWidgets;
 
-    auto addWidget = [&](QWidget *w) {
-        if (w != nullptr && !widgets.contains(w)) {
-            widgets.append(w);
+    auto addUnique = [](QList<QWidget *> &list, QWidget *w) {
+        if (w != nullptr && !list.contains(w)) {
+            list.append(w);
         }
     };
 
-    addWidget(findLabelExactText(parent, "KP"));
-    addWidget(findLabelExactText(parent, "KI"));
-    addWidget(findLabelExactText(parent, "KD"));
-    addWidget(findLabelContainsText(parent, QStringList() << "Speed"));
-    addWidget(gAbsAngleLimitLabel != nullptr ? gAbsAngleLimitLabel : findLabelContainsText(parent, QStringList() << "Abs Angle"));
-    addWidget(ui->kpEdit);
-    addWidget(ui->kiEdit);
-    addWidget(ui->kdEdit);
-    addWidget(ui->speedEdit);
-    addWidget(gAbsAngleLimitEdit);
-    addWidget(gSpeedUnitLabel);
-    addWidget(ui->btnSaveParameter);
+    QLabel *kpLabel = findLabelExactText(parent, "KP");
+    QLabel *kiLabel = findLabelExactText(parent, "KI");
+    QLabel *kdLabel = findLabelExactText(parent, "KD");
+    QLabel *speedLabel = findLabelContainsText(parent, QStringList() << "Speed");
+    QLabel *angleLimitLabel = gAbsAngleLimitLabel != nullptr
+                                  ? gAbsAngleLimitLabel
+                                  : findLabelContainsText(parent, QStringList() << "Abs Angle" << "Angle Limit");
 
-    const QRect contentRect = boundingRectForWidgets(widgets);
+    addUnique(pidWidgets, kpLabel);
+    addUnique(pidWidgets, kiLabel);
+    addUnique(pidWidgets, kdLabel);
+    addUnique(pidWidgets, ui->kpEdit);
+    addUnique(pidWidgets, ui->kiEdit);
+    addUnique(pidWidgets, ui->kdEdit);
 
-    if (!contentRect.isValid()) {
+    addUnique(speedLimitWidgets, speedLabel);
+    addUnique(speedLimitWidgets, angleLimitLabel);
+    addUnique(speedLimitWidgets, ui->speedEdit);
+    addUnique(speedLimitWidgets, gAbsAngleLimitEdit);
+    addUnique(speedLimitWidgets, gSpeedUnitLabel);
+
+    for (QWidget *w : pidWidgets) {
+        addUnique(originalWidthWidgets, w);
+    }
+
+    for (QWidget *w : speedLimitWidgets) {
+        addUnique(originalWidthWidgets, w);
+    }
+
+    // Save 也参加“原来大框”的宽度计算。这样两个新框的右边界不会缩短。
+    addUnique(originalWidthWidgets, ui->btnSaveParameter);
+
+    const QRect originalContentRect = boundingRectForWidgets(originalWidthWidgets);
+    if (!originalContentRect.isValid()) {
         return;
     }
 
-    const int paddingLeft = 28;
-    const int paddingRight = 28;
-    const int paddingTop = 22;
-    const int paddingBottom = 22;
+    // 这里沿用原来大框的 padding 和左边对齐逻辑：
+    // left / right 先算出原来大框范围，之后两个小框都拉到这个宽度。
+    const int originalPaddingLeft = 28;
+    const int originalPaddingRight = 28;
+    const int originalPaddingTop = 22;
+    const int originalPaddingBottom = 22;
 
-    int frameLeft = contentRect.left() - paddingLeft;
+    int fullFrameLeft = originalContentRect.left() - originalPaddingLeft;
     QLabel *motorAngleLabel = findLabelContainsText(parent, QStringList() << "Motor Angle");
 
     if (motorAngleLabel != nullptr) {
-        frameLeft = qMin(frameLeft, motorAngleLabel->geometry().left() - paddingLeft);
+        fullFrameLeft = qMin(fullFrameLeft, motorAngleLabel->geometry().left() - originalPaddingLeft);
     }
 
-    const int frameRight = contentRect.right() + paddingRight;
-
-    gParameterFrame->setGeometry(
-        frameLeft,
-        contentRect.top() - paddingTop,
-        frameRight - frameLeft + 1,
-        contentRect.height() + paddingTop + paddingBottom
+    const int fullFrameRight = originalContentRect.right() + originalPaddingRight;
+    QRect fullReferenceRect(
+        fullFrameLeft,
+        originalContentRect.top() - originalPaddingTop,
+        fullFrameRight - fullFrameLeft + 1,
+        originalContentRect.height() + originalPaddingTop + originalPaddingBottom
         );
 
-    gParameterFrame->show();
-    gParameterFrame->lower();
+    // 先按每组内容算高度；随后只强制 left / width 等于原来的大框。
+    setupParameterGroupFrame(gPidParameterFrame,
+                             parent,
+                             "pidParameterFrame",
+                             pidWidgets,
+                             24,
+                             24,
+                             16,
+                             16);
 
-    for (QWidget *w : widgets) {
+    setupParameterGroupFrame(gSpeedLimitParameterFrame,
+                             parent,
+                             "speedLimitParameterFrame",
+                             speedLimitWidgets,
+                             24,
+                             24,
+                             16,
+                             16);
+
+    auto stretchFrameToOriginalWidth = [&](QFrame *frame) {
+        if (frame == nullptr || !frame->geometry().isValid()) {
+            return;
+        }
+
+        QRect r = frame->geometry();
+        r.setLeft(fullReferenceRect.left());
+        r.setRight(fullReferenceRect.right());
+        frame->setGeometry(r);
+        frame->show();
+        frame->lower();
+    };
+
+    stretchFrameToOriginalWidth(gPidParameterFrame);
+    stretchFrameToOriginalWidth(gSpeedLimitParameterFrame);
+
+    QList<QWidget *> referenceWidgets;
+    addUnique(referenceWidgets, gPidParameterFrame);
+    addUnique(referenceWidgets, gSpeedLimitParameterFrame);
+    addUnique(referenceWidgets, ui->btnSaveParameter);
+
+    const QRect shownGroupRect = boundingRectForWidgets(referenceWidgets);
+    if (shownGroupRect.isValid()) {
+        gParameterFrame->setGeometry(shownGroupRect);
+    } else {
+        gParameterFrame->setGeometry(fullReferenceRect);
+    }
+
+    // 不显示整体大框，只保留 geometry 给 LED / 中间图 / Motor Angle 排版使用。
+    gParameterFrame->hide();
+
+    if (gPidParameterFrame != nullptr) {
+        gPidParameterFrame->lower();
+    }
+    if (gSpeedLimitParameterFrame != nullptr) {
+        gSpeedLimitParameterFrame->lower();
+    }
+
+    QList<QWidget *> allForegroundWidgets;
+    for (QWidget *w : pidWidgets) {
+        addUnique(allForegroundWidgets, w);
+    }
+    for (QWidget *w : speedLimitWidgets) {
+        addUnique(allForegroundWidgets, w);
+    }
+    addUnique(allForegroundWidgets, ui->btnSaveParameter);
+
+    for (QWidget *w : allForegroundWidgets) {
         if (w != nullptr) {
+            w->show();
             w->raise();
         }
     }
@@ -2786,6 +3094,8 @@ void fineTuneParameterAndLedLayout(Ui::MainWindow *ui)
     QWidget *parent = ui->centralwidget;
 
     addParameterWidget(gParameterFrame);
+    addParameterWidget(gPidParameterFrame);
+    addParameterWidget(gSpeedLimitParameterFrame);
     addParameterWidget(findLabelExactText(parent, "KP"));
     addParameterWidget(findLabelExactText(parent, "KI"));
     addParameterWidget(findLabelExactText(parent, "KD"));
@@ -2818,12 +3128,20 @@ void fineTuneParameterAndLedLayout(Ui::MainWindow *ui)
         gParameterFrame->lower();
     }
 
+    if (gPidParameterFrame != nullptr) {
+        gPidParameterFrame->lower();
+    }
+
+    if (gSpeedLimitParameterFrame != nullptr) {
+        gSpeedLimitParameterFrame->lower();
+    }
+
     if (gLedControlFrame != nullptr) {
         gLedControlFrame->lower();
     }
 
     for (QWidget *w : parameterWidgets) {
-        if (w != nullptr && w != gParameterFrame) {
+        if (w != nullptr && w != gParameterFrame && w != gPidParameterFrame && w != gSpeedLimitParameterFrame) {
             w->raise();
         }
     }

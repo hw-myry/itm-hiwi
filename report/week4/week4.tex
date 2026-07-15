@@ -1,0 +1,106 @@
+
+\documentclass[a4paper,12pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{tikz}
+
+\usetikzlibrary{arrows.meta,positioning}
+
+\geometry{margin=2.5cm}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.5em}
+
+\title{Bericht}
+\author{Jiaqi Wang}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+
+\section{Ausführen der Windows-Host-Software unter Ubuntu}
+
+Die Host-Software wurde ursprünglich auf einem Windows-Computer mit Qt5 entwickelt.
+Da die erzeugte Anwendung eine Windows-\texttt{.exe}-Datei ist, kann sie unter Ubuntu 22.04
+nicht direkt nativ ausgeführt werden.
+
+Zunächst wurde versucht, Qt5 direkt unter Ubuntu 22.04 zu installieren und die Host-Software
+auf dem Linux-System erneut zu kompilieren. Dafür wurden die folgenden Befehle verwendet:
+
+\begin{verbatim}
+sudo apt-get install qt5-default
+sudo apt update
+sudo apt install build-essential qtbase5-dev qtbase5-dev-tools qt5-qmake
+\end{verbatim}
+
+Anschließend wurde überprüft, ob \texttt{qmake} korrekt installiert wurde:
+
+\begin{verbatim}
+qmake -v
+\end{verbatim}
+
+Danach wurde versucht, den Quellcode der Host-Software mit \texttt{cmake} neu zu kompilieren:
+
+\begin{verbatim}
+cd '/home/itmhiwi/jwang/itm-hiwi-main/host_pc/test'
+mkdir build
+cd build
+cmake ..
+\end{verbatim}
+
+Dieser Ansatz ist jedoch aufwendiger, da die unter Windows entwickelte Qt5-Anwendung
+möglicherweise zusätzliche Anpassungen für die Linux-Umgebung benötigt. Außerdem müssen
+Abhängigkeiten, Projektkonfigurationen und plattformspezifische Einstellungen überprüft
+und gegebenenfalls geändert werden.
+
+Daher wurde anschließend eine einfachere und effizientere Methode gewählt: die Ausführung
+der vorhandenen Windows-\texttt{.exe}-Datei unter Ubuntu mithilfe von Wine. Wine ist eine
+Kompatibilitätsschicht, mit der viele Windows-Programme unter Linux ausgeführt werden können,
+ohne dass eine vollständige Windows-Installation oder eine virtuelle Maschine benötigt wird.
+
+\subsection{Installation von Wine}
+
+Zunächst wird die 32-Bit-Architektur aktiviert, da viele Windows-Programme zusätzlich
+32-Bit-Bibliotheken benötigen:
+
+\begin{verbatim}
+sudo dpkg --add-architecture i386
+sudo apt update
+\end{verbatim}
+
+Anschließend werden Wine und die benötigten Zusatzpakete installiert:
+
+\begin{verbatim}
+sudo apt install wine wine64 wine32 winetricks
+\end{verbatim}
+
+Die installierte Wine-Version kann mit folgendem Befehl überprüft werden:
+
+\begin{verbatim}
+wine --version
+\end{verbatim}
+
+\subsection{Starten der Host-Software mit Wine}
+
+Danach wird in das Verzeichnis gewechselt, in dem sich die Windows-\texttt{.exe}-Datei befindet:
+
+\begin{verbatim}
+cd '/home/itmhiwi/jwang/MotroController_APP_V1'
+cd pkg/
+\end{verbatim}
+
+Die Host-Software kann anschließend mit Wine gestartet werden:
+
+\begin{verbatim}
+wine MotroController.exe
+\end{verbatim}
+
+
+\end{document}
