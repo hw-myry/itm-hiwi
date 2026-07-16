@@ -78,6 +78,7 @@ QFrame *gLedControlFrame = nullptr; // LED Control 边框
 QFrame *gParameterFrame = nullptr;  // 参数模块整体参考区域（无边框，只用于排版基准）
 QFrame *gPidParameterFrame = nullptr;  // KP / KI / KD 参数边框
 QFrame *gSpeedLimitParameterFrame = nullptr; // Speed / Angle Limit 参数边框
+QPushButton *gSaveSpeedLimitButton = nullptr; // Speed / Angle Limit 单独 Save 按钮
 QFrame *gAngleControlFrame = nullptr; // Motor Angle / Send Angle 区域边框
 QLabel *gMiddleImageLabel = nullptr; // 参数模块和 LED 模块中间的图片接口
 QLabel *gTopImageLabel = nullptr;    // User TXT 和 Restart ESP32 中间的图片接口
@@ -117,6 +118,8 @@ bool gLastCommandWriteOk = false;
 // 每收到 ESP32 对上一条命令的 OK 回复后，再发送下一条命令。
 bool gSaveParameterRunning = false;
 QStringList gSaveParameterCommands;
+QStringList gSaveParameterExpectedReplies;
+QString gSaveParameterSuccessLog;
 int gSaveParameterStep = 0;
 int gSaveParameterSequenceId = 0;
 
@@ -2752,35 +2755,65 @@ void positionParameterBlockUpAndSaveButton(Ui::MainWindow *ui)
 
     QWidget *parent = ui->centralwidget;
     QList<QWidget *> parameterWidgets;
+    QList<QWidget *> pidWidgets;
+    QList<QWidget *> speedLimitWidgets;
 
-    auto addWidget = [&](QWidget *w) {
-        if (w != nullptr && !parameterWidgets.contains(w)) {
-            parameterWidgets.append(w);
+    auto addUnique = [](QList<QWidget *> &list, QWidget *w) {
+        if (w != nullptr && !list.contains(w)) {
+            list.append(w);
         }
     };
 
-    addWidget(findLabelExactText(parent, "KP"));
-    addWidget(findLabelExactText(parent, "KI"));
-    addWidget(findLabelExactText(parent, "KD"));
-    addWidget(findLabelContainsText(parent, QStringList() << "Speed"));
-    addWidget(gAbsAngleLimitLabel != nullptr ? gAbsAngleLimitLabel : findLabelContainsText(parent, QStringList() << "Abs Angle"));
-    addWidget(ui->kpEdit);
-    addWidget(ui->kiEdit);
-    addWidget(ui->kdEdit);
-    addWidget(ui->speedEdit);
-    addWidget(gAbsAngleLimitEdit);
-    addWidget(gSpeedUnitLabel);
+    QLabel *kpLabel = findLabelExactText(parent, "KP");
+    QLabel *kiLabel = findLabelExactText(parent, "KI");
+    QLabel *kdLabel = findLabelExactText(parent, "KD");
+    QLabel *speedLabel = findLabelContainsText(parent, QStringList() << "Speed");
+    QLabel *angleLimitLabel = gAbsAngleLimitLabel != nullptr
+                                  ? gAbsAngleLimitLabel
+                                  : findLabelContainsText(parent, QStringList() << "Abs Angle" << "Angle Limit");
+
+    addUnique(pidWidgets, kpLabel);
+    addUnique(pidWidgets, kiLabel);
+    addUnique(pidWidgets, kdLabel);
+    addUnique(pidWidgets, ui->kpEdit);
+    addUnique(pidWidgets, ui->kiEdit);
+    addUnique(pidWidgets, ui->kdEdit);
+
+    addUnique(speedLimitWidgets, speedLabel);
+    addUnique(speedLimitWidgets, angleLimitLabel);
+    addUnique(speedLimitWidgets, ui->speedEdit);
+    addUnique(speedLimitWidgets, gAbsAngleLimitEdit);
+    addUnique(speedLimitWidgets, gSpeedUnitLabel);
+
+    for (QWidget *w : pidWidgets) {
+        addUnique(parameterWidgets, w);
+    }
+    for (QWidget *w : speedLimitWidgets) {
+        addUnique(parameterWidgets, w);
+    }
 
     // 整个参数区域稍微上移一点。
     const int moveUp = 35;
     moveWidgetsBy(parameterWidgets, 0, -moveUp);
 
-    const QRect contentRect = boundingRectForWidgets(parameterWidgets);
-    if (!contentRect.isValid() || ui->btnSaveParameter == nullptr) {
+    const QRect pidContentRect = boundingRectForWidgets(pidWidgets);
+    const QRect speedLimitContentRect = boundingRectForWidgets(speedLimitWidgets);
+    const QRect allContentRect = boundingRectForWidgets(parameterWidgets);
+    if (!pidContentRect.isValid() || !speedLimitContentRect.isValid() ||
+        !allContentRect.isValid() || ui->btnSaveParameter == nullptr) {
         return;
     }
 
-    // Save 放进同一个参数框里，大小和 LED ON 按钮保持一致。
+    if (gSaveSpeedLimitButton == nullptr) {
+        gSaveSpeedLimitButton = parent->findChild<QPushButton *>("saveSpeedLimitButton");
+    }
+
+    if (gSaveSpeedLimitButton == nullptr) {
+        gSaveSpeedLimitButton = new QPushButton("Save", parent);
+        gSaveSpeedLimitButton->setObjectName("saveSpeedLimitButton");
+    }
+
+    // 两个 Save 按钮大小和 LED ON 按钮保持一致，并且上下两个框右侧对齐。
     const QSize saveButtonSize = (ui->btnLedOn != nullptr && ui->btnLedOn->width() > 0 && ui->btnLedOn->height() > 0)
                                      ? ui->btnLedOn->size()
                                      : QSize(110, 50);
@@ -2788,18 +2821,51 @@ void positionParameterBlockUpAndSaveButton(Ui::MainWindow *ui)
     const int buttonHeight = saveButtonSize.height();
     const int gap = 35;
 
-    const int buttonX = contentRect.right() + gap;
-    // Save 放到参数模块右上角：和第一行参数顶部对齐，不再垂直居中。
-    const int buttonY = contentRect.top();
+    const int buttonX = allContentRect.right() + gap;
+    const int pidButtonY = pidContentRect.top();
+    const int speedButtonY = speedLimitContentRect.top();
 
-    ui->btnSaveParameter->setGeometry(buttonX, buttonY, buttonWidth, buttonHeight);
+    ui->btnSaveParameter->setGeometry(buttonX, pidButtonY, buttonWidth, buttonHeight);
     ui->btnSaveParameter->setMinimumSize(buttonWidth, buttonHeight);
     ui->btnSaveParameter->setMaximumSize(buttonWidth, buttonHeight);
     ui->btnSaveParameter->setText("Save");
-
+    ui->btnSaveParameter->setToolTip("Save KP / KI / KD only.");
     ui->btnSaveParameter->setStyleSheet(GREEN_BUTTON_STYLE);
     ui->btnSaveParameter->show();
     ui->btnSaveParameter->raise();
+
+    gSaveSpeedLimitButton->setGeometry(buttonX, speedButtonY, buttonWidth, buttonHeight);
+    gSaveSpeedLimitButton->setMinimumSize(buttonWidth, buttonHeight);
+    gSaveSpeedLimitButton->setMaximumSize(buttonWidth, buttonHeight);
+    gSaveSpeedLimitButton->setText("Save");
+    gSaveSpeedLimitButton->setToolTip("Save Speed and Angle Limit only.");
+    gSaveSpeedLimitButton->setStyleSheet(GREEN_BUTTON_STYLE);
+    gSaveSpeedLimitButton->show();
+    gSaveSpeedLimitButton->raise();
+}
+
+void setSaveParameterButtonsEnabled(Ui::MainWindow *ui, bool enabled)
+{
+    if (ui != nullptr && ui->btnSaveParameter != nullptr) {
+        ui->btnSaveParameter->setEnabled(enabled);
+    }
+
+    if (gSaveSpeedLimitButton != nullptr) {
+        gSaveSpeedLimitButton->setEnabled(enabled);
+    }
+}
+
+void clearSaveParameterState(Ui::MainWindow *ui, bool enableButtons = true)
+{
+    gSaveParameterRunning = false;
+    gSaveParameterCommands.clear();
+    gSaveParameterExpectedReplies.clear();
+    gSaveParameterSuccessLog.clear();
+    gSaveParameterStep = 0;
+
+    if (enableButtons) {
+        setSaveParameterButtonsEnabled(ui, true);
+    }
 }
 
 void setupParameterGroupFrame(QFrame *&frame,
@@ -2924,8 +2990,9 @@ void setupParameterFrame(Ui::MainWindow *ui)
         addUnique(originalWidthWidgets, w);
     }
 
-    // Save 也参加“原来大框”的宽度计算。这样两个新框的右边界不会缩短。
+    // 两个 Save 也参加“原来大框”的宽度计算。这样两个新框的右边界不会缩短。
     addUnique(originalWidthWidgets, ui->btnSaveParameter);
+    addUnique(originalWidthWidgets, gSaveSpeedLimitButton);
 
     const QRect originalContentRect = boundingRectForWidgets(originalWidthWidgets);
     if (!originalContentRect.isValid()) {
@@ -2993,6 +3060,7 @@ void setupParameterFrame(Ui::MainWindow *ui)
     addUnique(referenceWidgets, gPidParameterFrame);
     addUnique(referenceWidgets, gSpeedLimitParameterFrame);
     addUnique(referenceWidgets, ui->btnSaveParameter);
+    addUnique(referenceWidgets, gSaveSpeedLimitButton);
 
     const QRect shownGroupRect = boundingRectForWidgets(referenceWidgets);
     if (shownGroupRect.isValid()) {
@@ -3019,6 +3087,7 @@ void setupParameterFrame(Ui::MainWindow *ui)
         addUnique(allForegroundWidgets, w);
     }
     addUnique(allForegroundWidgets, ui->btnSaveParameter);
+    addUnique(allForegroundWidgets, gSaveSpeedLimitButton);
 
     for (QWidget *w : allForegroundWidgets) {
         if (w != nullptr) {
@@ -3111,6 +3180,7 @@ void fineTuneParameterAndLedLayout(Ui::MainWindow *ui)
     addParameterWidget(gAbsAngleLimitEdit);
     addParameterWidget(gSpeedUnitLabel);
     addParameterWidget(ui->btnSaveParameter);
+    addParameterWidget(gSaveSpeedLimitButton);
 
     // 参数区域整体往上
     moveWidgetsBy(parameterWidgets, 0, -moveUpPx);
@@ -3354,6 +3424,81 @@ MainWindow::MainWindow(QWidget *parent)
     arrangeSpeedAndAngleLimitUnderKd(ui);
     positionParameterBlockUpAndSaveButton(ui);
     setupParameterFrame(ui);
+
+    if (gSaveSpeedLimitButton != nullptr) {
+        connect(gSaveSpeedLimitButton, &QPushButton::clicked, this, [=]() {
+            if (gSaveParameterRunning) {
+                addLog("Save already running, please wait for CFG? verification");
+                return;
+            }
+
+            if (gMotorMoving || gAngleSequenceRunning) {
+                addLog("Motor is moving, please save parameters after MOTOR_DONE");
+                return;
+            }
+
+            if (socket->state() != QAbstractSocket::ConnectedState) {
+                addLog("Not connected");
+                return;
+            }
+
+            QString speed = ui->speedEdit->text().trimmed();
+            QString angleLimit = gAbsAngleLimitEdit != nullptr ? gAbsAngleLimitEdit->text().trimmed() : QString("60");
+
+            if (speed.isEmpty() || angleLimit.isEmpty()) {
+                addLog("Speed / Angle Limit input empty");
+                return;
+            }
+
+            bool okSpeed = false;
+            bool okAngleLimit = false;
+            double speedVal = speed.toDouble(&okSpeed);
+            double angleLimitVal = angleLimit.toDouble(&okAngleLimit);
+
+            if (!okSpeed || !okAngleLimit) {
+                addLog("Speed / Angle Limit format error");
+                return;
+            }
+
+            if (speedVal < 1 || speedVal > 3000) {
+                addLog("Speed range error");
+                return;
+            }
+
+            if (angleLimitVal < 0 || angleLimitVal > 64800) {
+                addLog("Abs Angle Limit range error. Use 0 to disable, or 0 - 64800 degrees.");
+                return;
+            }
+
+            gSaveParameterCommands.clear();
+            gSaveParameterExpectedReplies.clear();
+            gSaveParameterSuccessLog = "Speed and Angle Limit save verified";
+            gSaveParameterCommands << QString("SPEED:%1").arg(speed)
+                                   << QString("ANGLE_LIMIT:%1").arg(angleLimit)
+                                   << QString("CFG_SAVE")
+                                   << QString("CFG?");
+            gSaveParameterExpectedReplies << QString("OK SPEED")
+                                          << QString("OK ANGLE_LIMIT")
+                                          << QString("OK CFG_SAVE")
+                                          << QString("CFG ");
+
+            gSaveParameterRunning = true;
+            gSaveParameterStep = 0;
+            gSaveParameterSequenceId++;
+            setSaveParameterButtonsEnabled(ui, false);
+
+            addLog("Save started: SPEED -> ANGLE_LIMIT -> CFG_SAVE -> CFG?");
+            sendCommand(gSaveParameterCommands.at(0), true);
+
+            const int sequenceId = gSaveParameterSequenceId;
+            QTimer::singleShot(6000, this, [=]() {
+                if (gSaveParameterRunning && sequenceId == gSaveParameterSequenceId) {
+                    clearSaveParameterState(ui);
+                    addLog("Save timeout: did not receive expected ESP32 reply. Check ESP32 log for OK SPEED / OK ANGLE_LIMIT / OK CFG_SAVE / CFG");
+                }
+            });
+        });
+    }
 
     ui->currentAngleEdit->setReadOnly(true);
 
@@ -3716,73 +3861,62 @@ void MainWindow::updateConfigEditsFromLine(const QString &line)
 void MainWindow::handleEsp32Line(const QString &line)
 {
     // Save Parameter 状态机：
-    // step 0: 已发 PID，等待 OK PID
-    // step 1: 已发 SPEED，等待 OK SPEED
-    // step 2: 已发 ANGLE_LIMIT，等待 OK ANGLE_LIMIT
-    // step 3: 已发 CFG_SAVE，等待 OK CFG_SAVE
-    // step 4: 已发 CFG?，等待 CFG 回读
+    // 现在支持两个独立 Save：
+    //   1) PID Save: PID -> CFG_SAVE -> CFG?
+    //   2) Speed/Limit Save: SPEED -> ANGLE_LIMIT -> CFG_SAVE -> CFG?
+    // 每一步都等待 ESP32 对上一条命令的回复，再发送下一条命令。
     if (gSaveParameterRunning) {
         if (line.startsWith("ERR") || line.startsWith("UNKNOWN CMD")) {
-            gSaveParameterRunning = false;
-            gSaveParameterCommands.clear();
-            gSaveParameterStep = 0;
-            ui->btnSaveParameter->setEnabled(true);
+            clearSaveParameterState(ui);
             addLog("Save failed, ESP32 replied: " + line);
             return;
         }
 
-        bool advanceSaveStep = false;
+        if (gSaveParameterStep >= 0 && gSaveParameterStep < gSaveParameterExpectedReplies.size()) {
+            const QString expectedReply = gSaveParameterExpectedReplies.at(gSaveParameterStep);
 
-        if (gSaveParameterStep == 0 && line.startsWith("OK PID")) {
-            updateConfigEditsFromLine(line);
-            advanceSaveStep = true;
-        } else if (gSaveParameterStep == 1 && line.startsWith("OK SPEED")) {
-            updateConfigEditsFromLine(line);
-            advanceSaveStep = true;
-        } else if (gSaveParameterStep == 2 && line.startsWith("OK ANGLE_LIMIT")) {
-            updateConfigEditsFromLine(line);
-            advanceSaveStep = true;
-        } else if (gSaveParameterStep == 3 && line.startsWith("OK CFG_SAVE")) {
-            updateConfigEditsFromLine(line);
-            addLog("ESP32 confirmed: PID, Speed and Angle Limit written to Flash");
-            advanceSaveStep = true;
-        } else if (gSaveParameterStep == 4 && line.startsWith("CFG ")) {
-            updateConfigEditsFromLine(line);
-            gSaveParameterRunning = false;
-            gSaveParameterCommands.clear();
-            gSaveParameterStep = 0;
-            ui->btnSaveParameter->setEnabled(true);
-            addLog("Save verified by CFG?: " + line);
-            return;
-        }
+            if (line.startsWith(expectedReply)) {
+                updateConfigEditsFromLine(line);
 
-        if (advanceSaveStep) {
-            gSaveParameterStep++;
+                const bool isLastReply = (gSaveParameterStep == gSaveParameterExpectedReplies.size() - 1);
 
-            if (gSaveParameterStep < gSaveParameterCommands.size()) {
-                const int sequenceId = gSaveParameterSequenceId;
-                const QString nextCmd = gSaveParameterCommands.at(gSaveParameterStep);
+                if (isLastReply) {
+                    const QString successLog = gSaveParameterSuccessLog;
+                    clearSaveParameterState(ui);
+                    addLog("Save verified by CFG?: " + line);
 
-                QTimer::singleShot(80, this, [=]() {
-                    if (!gSaveParameterRunning || sequenceId != gSaveParameterSequenceId) {
-                        return;
+                    if (!successLog.isEmpty()) {
+                        addLog(successLog);
                     }
 
-                    if (socket->state() != QAbstractSocket::ConnectedState) {
-                        gSaveParameterRunning = false;
-                        gSaveParameterCommands.clear();
-                        gSaveParameterStep = 0;
-                        ui->btnSaveParameter->setEnabled(true);
-                        addLog("Save stopped: disconnected before sending " + nextCmd);
-                        return;
-                    }
+                    return;
+                }
 
-                    sendCommand(nextCmd, true);
-                });
+                gSaveParameterStep++;
+
+                if (gSaveParameterStep < gSaveParameterCommands.size()) {
+                    const int sequenceId = gSaveParameterSequenceId;
+                    const QString nextCmd = gSaveParameterCommands.at(gSaveParameterStep);
+
+                    QTimer::singleShot(80, this, [=]() {
+                        if (!gSaveParameterRunning || sequenceId != gSaveParameterSequenceId) {
+                            return;
+                        }
+
+                        if (socket->state() != QAbstractSocket::ConnectedState) {
+                            clearSaveParameterState(ui);
+                            addLog("Save stopped: disconnected before sending " + nextCmd);
+                            return;
+                        }
+
+                        sendCommand(nextCmd, true);
+                    });
+                }
+
+                return;
             }
-
-            return;
         }
+
         // 其他行，比如周期 ANGLE? 回包，继续走普通解析，不影响保存状态机。
     }
 
@@ -4181,12 +4315,10 @@ void MainWindow::on_sendAngleButton_clicked()
 
 // =====================================================
 // Save Parameter
-// One button: send PID + Speed to ESP32 RAM, then save to Flash
-// Commands:
-// PID:Kp,Ki,Kd
-// SPEED:Speed
-// CFG_SAVE
-// CFG?
+// Two buttons:
+//   - upper Save: send PID to ESP32 RAM, then save to Flash
+//   - lower Save: send Speed + Angle Limit to ESP32 RAM, then save to Flash
+// Commands are sent one by one and each command waits for the matching ESP32 reply.
 // =====================================================
 void MainWindow::on_btnSaveParameter_clicked()
 {
@@ -4208,28 +4340,22 @@ void MainWindow::on_btnSaveParameter_clicked()
     QString kp = ui->kpEdit->text().trimmed();
     QString ki = ui->kiEdit->text().trimmed();
     QString kd = ui->kdEdit->text().trimmed();
-    QString speed = ui->speedEdit->text().trimmed();
-    QString angleLimit = gAbsAngleLimitEdit != nullptr ? gAbsAngleLimitEdit->text().trimmed() : QString("60");
 
-    if (kp.isEmpty() || ki.isEmpty() || kd.isEmpty() || speed.isEmpty() || angleLimit.isEmpty()) {
-        addLog("Parameter input empty");
+    if (kp.isEmpty() || ki.isEmpty() || kd.isEmpty()) {
+        addLog("PID input empty");
         return;
     }
 
     bool okKp = false;
     bool okKi = false;
     bool okKd = false;
-    bool okSpeed = false;
-    bool okAngleLimit = false;
 
     double kpVal = kp.toDouble(&okKp);
     double kiVal = ki.toDouble(&okKi);
     double kdVal = kd.toDouble(&okKd);
-    double speedVal = speed.toDouble(&okSpeed);
-    double angleLimitVal = angleLimit.toDouble(&okAngleLimit);
 
-    if (!okKp || !okKi || !okKd || !okSpeed || !okAngleLimit) {
-        addLog("Parameter format error");
+    if (!okKp || !okKi || !okKd) {
+        addLog("PID format error");
         return;
     }
 
@@ -4240,39 +4366,29 @@ void MainWindow::on_btnSaveParameter_clicked()
         return;
     }
 
-    if (speedVal < 1 || speedVal > 3000) {
-        addLog("Speed range error");
-        return;
-    }
-
-    if (angleLimitVal < 0 || angleLimitVal > 64800) {
-        addLog("Abs Angle Limit range error. Use 0 to disable, or 0 - 64800 degrees.");
-        return;
-    }
-
     gSaveParameterCommands.clear();
+    gSaveParameterExpectedReplies.clear();
+    gSaveParameterSuccessLog = "PID save verified";
     gSaveParameterCommands << QString("PID:%1,%2,%3").arg(kp).arg(ki).arg(kd)
-                           << QString("SPEED:%1").arg(speed)
-                           << QString("ANGLE_LIMIT:%1").arg(angleLimit)
                            << QString("CFG_SAVE")
                            << QString("CFG?");
+    gSaveParameterExpectedReplies << QString("OK PID")
+                                  << QString("OK CFG_SAVE")
+                                  << QString("CFG ");
 
     gSaveParameterRunning = true;
     gSaveParameterStep = 0;
     gSaveParameterSequenceId++;
-    ui->btnSaveParameter->setEnabled(false);
+    setSaveParameterButtonsEnabled(ui, false);
 
-    addLog("Save started: PID -> SPEED -> ANGLE_LIMIT -> CFG_SAVE -> CFG?");
+    addLog("Save started: PID -> CFG_SAVE -> CFG?");
     sendCommand(gSaveParameterCommands.at(0), true);
 
     const int sequenceId = gSaveParameterSequenceId;
     QTimer::singleShot(6000, this, [=]() {
         if (gSaveParameterRunning && sequenceId == gSaveParameterSequenceId) {
-            gSaveParameterRunning = false;
-            gSaveParameterCommands.clear();
-            gSaveParameterStep = 0;
-            ui->btnSaveParameter->setEnabled(true);
-            addLog("Save timeout: did not receive expected ESP32 reply. Check ESP32 log for OK PID / OK SPEED / OK ANGLE_LIMIT / OK CFG_SAVE / CFG");
+            clearSaveParameterState(ui);
+            addLog("Save timeout: did not receive expected ESP32 reply. Check ESP32 log for OK PID / OK CFG_SAVE / CFG");
         }
     });
 }
