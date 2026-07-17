@@ -1,18 +1,40 @@
 
 \documentclass[a4paper,12pt]{article}
 
+% Zeichenkodierung und Sprache
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
-\usepackage{graphicx}
-\usepackage{float}
+\usepackage[ngerman]{babel}
+\usepackage{lmodern}
+
+% Seitenlayout
 \usepackage{geometry}
-\usepackage{booktabs}
-\usepackage{tikz}
-
-\usetikzlibrary{arrows.meta,positioning}
-
 \geometry{margin=2.5cm}
 
+% Abbildungen, Tabellen und Zeichnungen
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
+
+% Quellcode und Pfadangaben
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{url}
+
+% Einstellungen für Befehlsblöcke
+\lstset{
+    basicstyle=\ttfamily\small,
+    frame=single,
+    breaklines=true,
+    columns=fullflexible,
+    keepspaces=true,
+    showstringspaces=false,
+    captionpos=b
+}
+
+% Absatzformatierung
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0.5em}
 
@@ -24,15 +46,15 @@
 
 \maketitle
 
+\section{Ausführen der Host-Software unter Ubuntu}
 
-\section{Ausführen der Windows-Host-Software unter Ubuntu}
+Die Host-Software wurde ursprünglich auf einem Windows-Computer mit Qt~5
+entwickelt. Da die erzeugte Anwendung eine Windows-\texttt{.exe}-Datei ist,
+kann sie unter Ubuntu 22.04 nicht direkt nativ ausgeführt werden.
 
-Die Host-Software wurde ursprünglich auf einem Windows-Computer mit Qt5 entwickelt.
-Da die erzeugte Anwendung eine Windows-\texttt{.exe}-Datei ist, kann sie unter Ubuntu 22.04
-nicht direkt nativ ausgeführt werden.
-
-Zunächst wurde versucht, Qt5 direkt unter Ubuntu 22.04 zu installieren und die Host-Software
-auf dem Linux-System erneut zu kompilieren. Dafür wurden die folgenden Befehle verwendet:
+Zunächst wurde versucht, Qt~5 direkt unter Ubuntu 22.04 zu installieren und
+die Host-Software auf dem Linux-System erneut zu kompilieren. Dafür wurden
+die folgenden Befehle verwendet:
 
 \begin{verbatim}
 sudo apt-get install qt5-default
@@ -46,7 +68,8 @@ Anschließend wurde überprüft, ob \texttt{qmake} korrekt installiert wurde:
 qmake -v
 \end{verbatim}
 
-Danach wurde versucht, den Quellcode der Host-Software mit \texttt{cmake} neu zu kompilieren:
+Danach wurde versucht, den Quellcode der Host-Software mit \texttt{cmake}
+neu zu kompilieren:
 
 \begin{verbatim}
 cd '/home/itmhiwi/jwang/itm-hiwi-main/host_pc/test'
@@ -55,20 +78,23 @@ cd build
 cmake ..
 \end{verbatim}
 
-Dieser Ansatz ist jedoch aufwendiger, da die unter Windows entwickelte Qt5-Anwendung
-möglicherweise zusätzliche Anpassungen für die Linux-Umgebung benötigt. Außerdem müssen
-Abhängigkeiten, Projektkonfigurationen und plattformspezifische Einstellungen überprüft
+Dieser Ansatz ist jedoch aufwendiger, da die unter Windows entwickelte
+Qt-5-Anwendung möglicherweise zusätzliche Anpassungen für die
+Linux-Umgebung benötigt. Außerdem müssen Abhängigkeiten,
+Projektkonfigurationen und plattformspezifische Einstellungen überprüft
 und gegebenenfalls geändert werden.
 
-Daher wurde anschließend eine einfachere und effizientere Methode gewählt: die Ausführung
-der vorhandenen Windows-\texttt{.exe}-Datei unter Ubuntu mithilfe von Wine. Wine ist eine
-Kompatibilitätsschicht, mit der viele Windows-Programme unter Linux ausgeführt werden können,
-ohne dass eine vollständige Windows-Installation oder eine virtuelle Maschine benötigt wird.
+Daher wurde anschließend eine einfachere und effizientere Methode gewählt:
+die Ausführung der vorhandenen Windows-\texttt{.exe}-Datei unter Ubuntu
+mithilfe von Wine. Wine ist eine Kompatibilitätsschicht, mit der viele
+Windows-Programme unter Linux ausgeführt werden können, ohne dass eine
+vollständige Windows-Installation oder eine virtuelle Maschine benötigt
+wird.
 
 \subsection{Installation von Wine}
 
-Zunächst wird die 32-Bit-Architektur aktiviert, da viele Windows-Programme zusätzlich
-32-Bit-Bibliotheken benötigen:
+Zunächst wird die 32-Bit-Architektur aktiviert, da viele Windows-Programme
+zusätzlich 32-Bit-Bibliotheken benötigen:
 
 \begin{verbatim}
 sudo dpkg --add-architecture i386
@@ -89,11 +115,12 @@ wine --version
 
 \subsection{Starten der Host-Software mit Wine}
 
-Danach wird in das Verzeichnis gewechselt, in dem sich die Windows-\texttt{.exe}-Datei befindet:
+Danach wird in das Verzeichnis gewechselt, in dem sich die
+Windows-\texttt{.exe}-Datei befindet:
 
 \begin{verbatim}
 cd '/home/itmhiwi/jwang/MotroController_APP_V1'
-cd pkg/
+cd pkg
 \end{verbatim}
 
 Die Host-Software kann anschließend mit Wine gestartet werden:
@@ -103,4 +130,233 @@ wine MotroController.exe
 \end{verbatim}
 
 
+\section{Aktualisierung der PC-Software}
+
+Im Rahmen der Weiterentwicklung wurde die Benutzeroberfläche der
+PC-Software überarbeitet. Ziel der Anpassungen war es, die Bedienung
+übersichtlicher zu gestalten und die Einstellung des Motors intuitiver
+zu machen. Die wichtigsten Änderungen sind im Folgenden zusammengefasst:
+
+
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{ui.png}
+    \caption{Aktualisierte Benutzeroberfläche der PC-Software}
+    \label{fig:ui}
+\end{figure}
+
+
+\begin{itemize}
+
+    \item \textbf{Anpassung der Logo-Position:}
+
+    Das Logo wurde in die obere rechte Ecke der Benutzeroberfläche
+    verschoben. Dadurch nimmt es weniger Platz im zentralen
+    Bedienbereich ein und beeinträchtigt die Darstellung der
+    Steuerungselemente nicht.
+
+    \item \textbf{Trennung der PID-Parameter von den Betriebsparametern:}
+
+    Die PID-Reglerparameter \(K_p\), \(K_i\) und \(K_d\) wurden von den
+    Parametern \textit{Speed} und \textit{Angle Limit} räumlich getrennt.
+    Da die PID-Parameter nach der Inbetriebnahme nur selten verändert
+    werden, sind sie nun in einem separaten Einstellungsbereich
+    angeordnet. Die häufiger verwendeten Betriebsparameter bleiben
+    dadurch leichter zugänglich.
+
+    \item \textbf{Ergänzung der Winkeleinheit:}
+
+    Bei allen winkelbezogenen Eingabefeldern und Anzeigen wurde die
+    Einheit Grad (\(^{\circ}\)) ergänzt. Dadurch ist die Bedeutung der
+    eingegebenen und angezeigten Werte eindeutig erkennbar.
+
+    \item \textbf{Darstellung des Motors in der Vorderansicht:}
+
+    In der Mitte der Benutzeroberfläche wurde eine Vorderansicht des
+    Motors eingefügt. Diese Darstellung ermöglicht eine intuitive
+    Zuordnung der Drehrichtung: Ein positiver Winkel entspricht einer
+    Drehung nach links, während ein negativer Winkel eine Drehung nach
+    rechts beschreibt.
+
+\end{itemize}
+
+
+
+
+
+Nach Abschluss der Entwicklung wurde die Qt-Anwendung zusammen mit allen
+erforderlichen Laufzeitbibliotheken und Ressourcendateien in einem
+separaten Ordner bereitgestellt. Als Entwicklungsumgebung wurde Qt~5.15.19
+mit dem MinGW-64-Bit-Compiler verwendet.
+
+Zunächst wird im Verzeichnis
+
+\begin{center}
+    \path{host_pc/test/build}
+\end{center}
+
+ein neuer Ordner mit dem Namen \path{pkg} erstellt. Anschließend werden
+die ausführbare Datei und die benötigten Ressourcendateien aus dem
+Build-Verzeichnis
+
+\begin{center}
+    \path{Deskt_QT_5_15_19_MinGW_64_bit-Debug}
+\end{center}
+
+in den Ordner \path{pkg} kopiert.
+
+Die folgenden Befehle werden in einer Windows-Eingabeaufforderung
+ausgeführt:
+
+\begin{lstlisting}[caption={Vorbereitung des Paketordners}]
+cd host_pc\test\build
+
+mkdir pkg
+
+copy Deskt_QT_5_15_19_MinGW_64_bit-Debug\test.exe pkg\
+copy Deskt_QT_5_15_19_MinGW_64_bit-Debug\top_middle_image.png pkg\
+copy Deskt_QT_5_15_19_MinGW_64_bit-Debug\middle_image.png pkg\
+copy Deskt_QT_5_15_19_MinGW_64_bit-Debug\user.txt pkg\
+\end{lstlisting}
+
+Nach dem Kopieren kann der Name der ausführbaren Datei geändert werden.
+In diesem Fall wird die Datei \path{test.exe} in
+\path{MotorController.exe} umbenannt:
+
+\begin{lstlisting}[caption={Umbenennung der ausführbaren Datei}]
+cd pkg
+ren test.exe MotorController.exe
+\end{lstlisting}
+
+Die Umbenennung ändert lediglich den angezeigten Dateinamen und hat keinen
+Einfluss auf die grundlegende Funktion des Programms.
+
+Danach wird die zur verwendeten Qt- und MinGW-Version passende
+Qt-Kommandozeile geöffnet. Dabei muss darauf geachtet werden, dass die
+Qt-Kommandozeile für Qt~5.15.19 und MinGW 64-Bit verwendet wird.
+
+Anschließend wird in den zuvor erstellten Paketordner gewechselt:
+
+\begin{lstlisting}[caption={Wechsel in den Paketordner}]
+cd host_pc\test\build\pkg
+\end{lstlisting}
+
+Falls sich das Projekt auf einem anderen Laufwerk befindet, kann in der
+Windows-Eingabeaufforderung zusätzlich die Option \texttt{/d} verwendet
+werden:
+
+\begin{lstlisting}[caption={Wechsel des Laufwerks und Verzeichnisses}]
+cd /d C:\Pfad\zu\host_pc\test\build\pkg
+\end{lstlisting}
+
+Mit dem Werkzeug \texttt{windeployqt} werden anschließend alle für die
+Ausführung erforderlichen Qt-Bibliotheken, Plugins und
+Compiler-Laufzeitdateien automatisch in den Paketordner kopiert. Da die
+ausführbare Datei zuvor umbenannt wurde, muss beim Aufruf ebenfalls der
+neue Dateiname verwendet werden:
+
+\begin{lstlisting}[caption={Bereitstellung der Qt-Laufzeitbibliotheken}]
+windeployqt --debug --compiler-runtime MotorController.exe
+\end{lstlisting}
+
+Die Option \texttt{--debug} wird verwendet, da die Anwendung aus dem
+Debug-Build-Verzeichnis stammt. Die Option \texttt{--compiler-runtime}
+stellt zusätzlich die erforderlichen MinGW-Laufzeitbibliotheken bereit.
+
+Nach erfolgreicher Ausführung enthält der Ordner \path{pkg} neben der
+Datei \path{MotorController.exe} unter anderem die benötigten
+Qt-DLL-Dateien, Plattform-Plugins, Compiler-Laufzeitbibliotheken sowie
+die folgenden Ressourcendateien:
+
+\begin{itemize}
+    \item \path{top_middle_image.png}
+    \item \path{middle_image.png}
+    \item \path{user.txt}
+\end{itemize}
+
+Abschließend wird der vollständige Paketordner als ZIP-Datei komprimiert.
+
+
+Die erzeugte Datei \path{MotorController_APP_V1.1.zip} enthält das
+vollständige Programmpaket. Sie kann auf einen anderen Windows-PC
+übertragen und dort entpackt werden.
+
+Nach dem Entpacken kann das Programm direkt über die Datei
+\path{MotorController.exe} gestartet werden, ohne dass auf dem
+Zielcomputer eine separate Qt-Installation erforderlich ist.
+
+
+\newpage
+
+\section{Lötarbeiten}
+
+Das ESP32-S3-Modul, der 12-V-zu-5-V-DC/DC-Wandler und das
+A4988-Schrittmotortreibermodul wurden auf einer Lochrasterplatine
+montiert und verlötet.
+
+Zusätzlich wurden eine Schraubklemme für den 12-V-Eingang sowie ein
+Anschluss für den EC11-Drehgeber herausgeführt. Für einen späteren
+optischen Sensor wurde außerdem ein freier Anschluss vorgesehen.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{solder.jpg}
+    \caption{Gelötete Steuerplatine auf der Lochrasterplatine}
+    \label{fig:solder}
+\end{figure}
+
+
+
+
+\section{Messung der Leistungsaufnahme}
+
+Für den Test wurde die Schaltung über ein Labornetzgerät mit 12~V
+versorgt. Dabei zeigte sich, dass das ESP32-S3-Modul und der
+EC11-Drehgeber nur einen geringen Anteil der Gesamtleistung aufnehmen.
+Der größte Anteil entfällt auf das A4988-Modul und den Schrittmotor.
+
+Der Motorstrom wurde über das Potentiometer des A4988-Moduls eingestellt.
+Bei etwa 400~mA arbeitete der Motor zuverlässig und mit zufriedenstellender
+Leistung. Eine Einstellung bis ungefähr 1,6~A ist möglich, führt jedoch
+zu einer sehr starken Erwärmung des A4988-Moduls. Bei einem Strom von
+100~mA konnte sich der Motor nicht drehen.
+
+Aus diesem Grund wurde ein Motorstrom von etwa 400~mA als geeigneter
+Betriebswert gewählt.
+
+
+\section{To-Do-List}
+
+Für die nächsten Versuche ist eine Versorgung über eine 12-V-Batterie
+vorgesehen. Da der Versuchsaufbau in der Mitte des Labors platziert werden
+soll, wären bei der Verwendung eines Labornetzgeräts möglicherweise sehr
+lange Stromleitungen erforderlich. Aus diesem Grund ist eine direkte
+Batterieversorgung praktischer.
+
+Für den Anschluss der Batterie müssen geeignete Leitungen und Steckverbinder
+ausgewählt und angepasst werden. Dabei sind insbesondere der erforderliche
+Strom, die Polarität und eine sichere Befestigung zu berücksichtigen.
+
+Zusätzlich soll mit der Software Inkscape eine Grundplatte entworfen werden.
+Auf dieser Grundplatte sollen der Motor, die Steuerplatine und die Batterie
+gemeinsam befestigt werden, sodass ein kompakter und stabiler Versuchsaufbau
+entsteht.
+
+Ein weiterer Arbeitsschritt ist die Ansteuerung des ESP32-S3 in einer
+ROS-2-Umgebung. Dadurch soll die Steuerung später in den Versuchsaufbau
+integriert und für weitere Experimente vorbereitet werden.
+
+\begin{itemize}
+    \item 12-V-Batterie als Spannungsversorgung verwenden,
+    \item geeignete Leitungen und Anschlüsse für die Batterie vorbereiten,
+    \item Grundplatte mit Inkscape entwerfen,
+    \item Motor, Steuerplatine und Batterie auf der Grundplatte befestigen,
+    \item Kommunikation und Steuerung des ESP32-S3 unter ROS~2 realisieren.
+\end{itemize}
+
+
+
+
 \end{document}
+

@@ -69,6 +69,10 @@ QLineEdit *gAbsAngleLimitEdit = nullptr;
 QLabel *gAbsAngleLimitLabel = nullptr;
 QLabel *gCommTextLabel = nullptr; // 注释 / Button Help
 QLabel *gSpeedUnitLabel = nullptr;  // Speed unit: Step/s
+QLabel *gAbsAngleLimitUnitLabel = nullptr; // Angle Limit unit: degree
+QLabel *gMotorAngleUnitLabel = nullptr;    // Motor Angle unit: degree
+QLabel *gCurrentAngleUnitLabel = nullptr;  // Current Angle unit: degree
+QLabel *gMotorDirectionHintLabel = nullptr; // Motor direction hint: +left, -right
 QFrame *gConnectionFrame = nullptr; //边框
 QFrame *gWifiFrame = nullptr;
 QLabel *gWifiIconLabel = nullptr;
@@ -1289,6 +1293,110 @@ void setupSpeedUnitLabel(Ui::MainWindow *ui)
     gSpeedUnitLabel->raise();
 }
 
+void setupAngleUnitLabels(Ui::MainWindow *ui)
+{
+    if (ui == nullptr ||
+        ui->angleEdit == nullptr ||
+        ui->currentAngleEdit == nullptr ||
+        gAbsAngleLimitEdit == nullptr) {
+        return;
+    }
+
+    auto setupUnitLabel = [](QLabel *&label,
+                             QWidget *parent,
+                             const QString &objectName) {
+        if (parent == nullptr) {
+            return;
+        }
+
+        label = parent->findChild<QLabel *>(objectName);
+
+        if (label == nullptr) {
+            label = new QLabel("degree", parent);
+            label->setObjectName(objectName);
+        }
+
+        label->setText("degree");
+        label->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        label->setStyleSheet(
+            "QLabel {"
+            " color: #2c3e50;"
+            "}"
+            );
+        label->show();
+        label->raise();
+    };
+
+    setupUnitLabel(gAbsAngleLimitUnitLabel,
+                   gAbsAngleLimitEdit->parentWidget(),
+                   "absAngleLimitUnitLabel");
+    setupUnitLabel(gMotorAngleUnitLabel,
+                   ui->angleEdit->parentWidget(),
+                   "motorAngleUnitLabel");
+    setupUnitLabel(gCurrentAngleUnitLabel,
+                   ui->currentAngleEdit->parentWidget(),
+                   "currentAngleUnitLabel");
+
+    auto positionUnitLabel = [](QLineEdit *edit, QLabel *label) {
+        if (edit == nullptr || label == nullptr) {
+            return;
+        }
+
+        const QRect editRect = edit->geometry();
+        const int unitWidth = 90;
+        const int unitHeight = editRect.height() > 0 ? editRect.height() : 28;
+
+        label->setGeometry(editRect.right() + 12,
+                           editRect.top(),
+                           unitWidth,
+                           unitHeight);
+        label->show();
+        label->raise();
+    };
+
+    positionUnitLabel(gAbsAngleLimitEdit, gAbsAngleLimitUnitLabel);
+    positionUnitLabel(ui->angleEdit, gMotorAngleUnitLabel);
+    positionUnitLabel(ui->currentAngleEdit, gCurrentAngleUnitLabel);
+
+    QWidget *motorParent = ui->angleEdit->parentWidget();
+    if (motorParent == nullptr) {
+        motorParent = ui->centralwidget;
+    }
+
+    if (motorParent != nullptr) {
+        gMotorDirectionHintLabel =
+            motorParent->findChild<QLabel *>("motorDirectionHintLabel");
+
+        if (gMotorDirectionHintLabel == nullptr) {
+            gMotorDirectionHintLabel = new QLabel("+left, -right", motorParent);
+            gMotorDirectionHintLabel->setObjectName("motorDirectionHintLabel");
+        }
+
+        gMotorDirectionHintLabel->setText("+left, -right");
+        gMotorDirectionHintLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        gMotorDirectionHintLabel->setStyleSheet(
+            "QLabel {"
+            " color: #5d6d7e;"
+            "}"
+            );
+
+        const QRect motorRect = ui->angleEdit->geometry();
+        const int hintGap = 2;
+        const int hintHeight = 18;
+        const int hintWidth = qMax(190, motorRect.width() + 90);
+
+        gMotorDirectionHintLabel->setGeometry(motorRect.left(),
+                                              motorRect.bottom() + hintGap,
+                                              hintWidth,
+                                              hintHeight);
+        gMotorDirectionHintLabel->show();
+        gMotorDirectionHintLabel->raise();
+
+        // Keep every existing control exactly where it was. In particular,
+        // Reset Angle Zero is not repositioned by the unit/hint setup.
+    }
+}
+
 
 void removeFontRulesFromStyleSheet(QWidget *w);
 
@@ -1412,6 +1520,22 @@ void applyUiScale(Ui::MainWindow *ui)
 
     if (gSpeedUnitLabel != nullptr) {
         gSpeedUnitLabel->raise();
+    }
+
+    if (gAbsAngleLimitUnitLabel != nullptr) {
+        gAbsAngleLimitUnitLabel->raise();
+    }
+
+    if (gMotorAngleUnitLabel != nullptr) {
+        gMotorAngleUnitLabel->raise();
+    }
+
+    if (gCurrentAngleUnitLabel != nullptr) {
+        gCurrentAngleUnitLabel->raise();
+    }
+
+    if (gMotorDirectionHintLabel != nullptr) {
+        gMotorDirectionHintLabel->raise();
     }
 
     if (gConnectionFrame != nullptr) {
@@ -1566,6 +1690,7 @@ void setupResponsiveScaling(QObject *owner, Ui::MainWindow *ui)
         // 右上角注释框已经删除，不再定位显示
         // positionCommTextTopRight(ui->centralwidget);
         setupSpeedUnitLabel(ui);
+        setupAngleUnitLabels(ui);
 
         // 构造函数刚运行时 centralwidget 的真实宽度可能还没准备好，
         // 所以这里再排一次右侧模块，避免 LED / Save / 参数框相互重叠。
@@ -2023,6 +2148,9 @@ QRect sendAngleAreaReferenceRect(Ui::MainWindow *ui)
     addWidget(findLabelContainsText(parent, QStringList() << "Current Angle"));
     addWidget(ui->angleEdit);
     addWidget(ui->currentAngleEdit);
+    addWidget(gMotorAngleUnitLabel);
+    addWidget(gCurrentAngleUnitLabel);
+    addWidget(gMotorDirectionHintLabel);
     addWidget(gResetAngleButton);
     addWidget(ui->sendAngleButton);
     addWidget(gAngleModeLabel);
@@ -2444,6 +2572,9 @@ void setupAngleControlFrame(Ui::MainWindow *ui)
     addWidget(findLabelContainsText(parent, QStringList() << "Current Angle"));
     addWidget(ui->angleEdit);
     addWidget(ui->currentAngleEdit);
+    addWidget(gMotorAngleUnitLabel);
+    addWidget(gCurrentAngleUnitLabel);
+    addWidget(gMotorDirectionHintLabel);
     addWidget(gResetAngleButton);
     addWidget(ui->sendAngleButton);
     addWidget(gAngleModeLabel);
@@ -2657,6 +2788,15 @@ void arrangeSpeedAndAngleLimitUnderKd(Ui::MainWindow *ui)
         gAbsAngleLimitEdit->show();
         gAbsAngleLimitEdit->raise();
     }
+
+    if (gAbsAngleLimitUnitLabel != nullptr) {
+        gAbsAngleLimitUnitLabel->setGeometry(editX + editWidth + 12,
+                                             absY,
+                                             90,
+                                             editHeight);
+        gAbsAngleLimitUnitLabel->show();
+        gAbsAngleLimitUnitLabel->raise();
+    }
 }
 
 void shiftInputColumnsRight(Ui::MainWindow *ui)
@@ -2686,10 +2826,14 @@ void shiftInputColumnsRight(Ui::MainWindow *ui)
     moveOnce(ui->speedEdit);
     moveOnce(gAbsAngleLimitEdit);
     moveOnce(gSpeedUnitLabel);
+    moveOnce(gAbsAngleLimitUnitLabel);
 
-    // Motor Angle / Current Angle 的输入框也右移，给标签留完整显示宽度。
+    // Motor Angle / Current Angle 的输入框、单位和提示一起右移。
     moveOnce(ui->angleEdit);
     moveOnce(ui->currentAngleEdit);
+    moveOnce(gMotorAngleUnitLabel);
+    moveOnce(gCurrentAngleUnitLabel);
+    moveOnce(gMotorDirectionHintLabel);
 
     QLabel *motorAngleLabel =
         findLabelContainsText(ui->centralwidget, QStringList() << "Motor Angle");
@@ -2784,6 +2928,7 @@ void positionParameterBlockUpAndSaveButton(Ui::MainWindow *ui)
     addUnique(speedLimitWidgets, ui->speedEdit);
     addUnique(speedLimitWidgets, gAbsAngleLimitEdit);
     addUnique(speedLimitWidgets, gSpeedUnitLabel);
+    addUnique(speedLimitWidgets, gAbsAngleLimitUnitLabel);
 
     for (QWidget *w : pidWidgets) {
         addUnique(parameterWidgets, w);
@@ -2981,6 +3126,7 @@ void setupParameterFrame(Ui::MainWindow *ui)
     addUnique(speedLimitWidgets, ui->speedEdit);
     addUnique(speedLimitWidgets, gAbsAngleLimitEdit);
     addUnique(speedLimitWidgets, gSpeedUnitLabel);
+    addUnique(speedLimitWidgets, gAbsAngleLimitUnitLabel);
 
     for (QWidget *w : pidWidgets) {
         addUnique(originalWidthWidgets, w);
@@ -3116,6 +3262,9 @@ void positionMotorAngleBlockBelowParameter(Ui::MainWindow *ui)
     addWidget(findLabelContainsText(parent, QStringList() << "Current Angle"));
     addWidget(ui->angleEdit);
     addWidget(ui->currentAngleEdit);
+    addWidget(gMotorAngleUnitLabel);
+    addWidget(gCurrentAngleUnitLabel);
+    addWidget(gMotorDirectionHintLabel);
     addWidget(gResetAngleButton);
 
     const QRect contentRect = boundingRectForWidgets(widgets);
@@ -3179,6 +3328,7 @@ void fineTuneParameterAndLedLayout(Ui::MainWindow *ui)
     addParameterWidget(ui->speedEdit);
     addParameterWidget(gAbsAngleLimitEdit);
     addParameterWidget(gSpeedUnitLabel);
+    addParameterWidget(gAbsAngleLimitUnitLabel);
     addParameterWidget(ui->btnSaveParameter);
     addParameterWidget(gSaveSpeedLimitButton);
 
@@ -3408,6 +3558,7 @@ MainWindow::MainWindow(QWidget *parent)
     ui->speedEdit->setText("500");
     setupAbsAngleLimitEditor(ui);
     setupSpeedUnitLabel(ui);
+    setupAngleUnitLabels(ui);
 
     // 输入框列整体右移，给左侧标签（尤其 Current Angle）留完整显示空间。
     shiftInputColumnsRight(ui);
