@@ -1,9 +1,9 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.13)  17 JUL 2026 10:49
+This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.13)  21 JUL 2026 15:10
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
-**week4.tex
-(./week4.tex
+**week5.tex
+(./week5.tex
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-01-19>
 (c:/texlive/2026/texmf-dist/tex/latex/base/article.cls
@@ -508,11 +508,11 @@ File: t1lmr.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 File: l3backend-pdftex.def 2025-10-09 L3 backend support: PDF output (pdfTeX)
 \l__color_backend_stack_int=\count322
 )
-(./week4.aux
+(./week5.aux
 Package babel Info: 'ngerman' activates 'german' shorthands.
 (babel)             Reported on input line 5.
 )
-\openout1 = `week4.aux'.
+\openout1 = `week5.aux'.
 
 LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 45.
 LaTeX Font Info:    ... okay on input line 45.
@@ -617,83 +617,41 @@ LaTeX Font Info:    External font `lmex10' loaded for size
 LaTeX Font Info:    External font `lmex10' loaded for size
 (Font)              <7> on input line 47.
 LaTeX Font Info:    Trying to load font information for T1+lmtt on input line 5
-2.
+3.
 
 (c:/texlive/2026/texmf-dist/tex/latex/lm/t1lmtt.fd
 File: t1lmtt.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
-) [1
+)
+Overfull \hbox (2.2354pt too wide) in paragraph at lines 55--56
+\T1/lmr/m/n/12 folg-rei-chem Emp-fang wer-den die drei Farb-wer-te aus-ge-le-se
+n und an die Bi-blio-thek \T1/lmtt/m/n/12 Adafruit
+ []
+
+[1
 
 {c:/texlive/2026/texmf-var/fonts/map/pdftex/updmap/pdftex.map}{c:/texlive/2026/
-texmf-dist/fonts/enc/dvips/lm/lm-ec.enc}]
-<ui.png, id=13, 532.99126pt x 398.23781pt>
-File: ui.png Graphic file (type png)
-<use ui.png>
-Package pdftex.def Info: ui.png  used on input line 144.
-(pdftex.def)             Requested size: 409.71692pt x 306.1397pt.
- [2]
-LaTeX Font Info:    Trying to load font information for TS1+lmr on input line 1
-52.
- (c:/texlive/2026/texmf-dist/tex/latex/lm/ts1lmr.fd
-File: ts1lmr.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
-)
-LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <12> on input line 161.
-LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <8> on input line 161.
-LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <6> on input line 161.
-
-[3{c:/texlive/2026/texmf-dist/fonts/enc/dvips/lm/lm-ts1.enc}{c:/texlive/2026/te
-xmf-dist/fonts/enc/dvips/lm/lm-mathit.enc}{c:/texlive/2026/texmf-dist/fonts/enc
-/dvips/lm/lm-mathsy.enc} <./ui.png>] [4]
-Overfull \hbox (0.43672pt too wide) in paragraph at lines 267--271
-[]\T1/lmr/m/n/12 Nach er-folg-rei-cher Aus-füh-rung ent-hält der Ord-ner $\T1/l
-mtt/m/n/12 pkg$ \T1/lmr/m/n/12 ne-ben der Da-tei $\T1/lmtt/m/n/12 MotorControll
-er .
- []
-
-
-Overfull \hbox (60.5865pt too wide) in paragraph at lines 267--271
-\T1/lmtt/m/n/12 exe$ \T1/lmr/m/n/12 un-ter an-de-rem die be-nö-tig-ten Qt-DLL-D
-ateien, Plattform-Plugins, Compiler-Laufzeitbibliotheken
- []
-
-[5]
-Overfull \hbox (37.53972pt too wide) in paragraph at lines 294--297
-\T1/lmr/m/n/12 Das ESP32-S3-Modul, der 12V-zu-5V DC/DC-Wandler und das A4988-Sc
-hrittmotortreibermodul
- []
-
-<solder.jpg, id=34, 1288.815pt x 1435.3625pt>
-File: solder.jpg Graphic file (type jpg)
-<use solder.jpg>
-Package pdftex.def Info: solder.jpg  used on input line 304.
-(pdftex.def)             Requested size: 273.14923pt x 304.19466pt.
-[6 <./solder.jpg>] [7] (./week4.aux)
+texmf-dist/fonts/enc/dvips/lm/lm-ec.enc}] (./week5.aux)
  ***********
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-01-19>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 16269 strings out of 467525
- 319583 string characters out of 5423209
- 779974 words of memory out of 5000000
- 44896 multiletter control sequences out of 15000+600000
- 676918 words of font info for 72 fonts, out of 8000000 for 9000
+ 15924 strings out of 467525
+ 315973 string characters out of 5423209
+ 710930 words of memory out of 5000000
+ 44566 multiletter control sequences out of 15000+600000
+ 655165 words of font info for 58 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 84i,6n,104p,426b,1079s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 84i,6n,104p,426b,266s stack positions out of 10000i,1000n,20000p,200000b,200000s
 <c:/texlive/2026/texmf-dist/fonts/type1/public/lm/lmbx12.pfb><c:/texlive/2026
-/texmf-dist/fonts/type1/public/lm/lmmi12.pfb><c:/texlive/2026/texmf-dist/fonts/
-type1/public/lm/lmmi8.pfb><c:/texlive/2026/texmf-dist/fonts/type1/public/lm/lmr
-12.pfb><c:/texlive/2026/texmf-dist/fonts/type1/public/lm/lmr17.pfb><c:/texlive/
-2026/texmf-dist/fonts/type1/public/lm/lmri12.pfb><c:/texlive/2026/texmf-dist/fo
-nts/type1/public/lm/lmsy8.pfb><c:/texlive/2026/texmf-dist/fonts/type1/public/lm
-/lmtt10.pfb><c:/texlive/2026/texmf-dist/fonts/type1/public/lm/lmtt12.pfb>
-Output written on week4.pdf (7 pages, 663135 bytes).
+/texmf-dist/fonts/type1/public/lm/lmr12.pfb><c:/texlive/2026/texmf-dist/fonts/t
+ype1/public/lm/lmr17.pfb><c:/texlive/2026/texmf-dist/fonts/type1/public/lm/lmtt
+12.pfb>
+Output written on week5.pdf (1 page, 105804 bytes).
 PDF statistics:
- 87 PDF objects out of 1000 (max. 8388607)
- 55 compressed objects within 1 object stream
+ 32 PDF objects out of 1000 (max. 8388607)
+ 20 compressed objects within 1 object stream
  0 named destinations out of 1000 (max. 500000)
- 23 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 13 words of extra memory for PDF output out of 10000 (max. 10000000)
 

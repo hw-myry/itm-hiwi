@@ -1,0 +1,71 @@
+
+\documentclass[a4paper,12pt]{article}
+
+% Zeichenkodierung und Sprache
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage{lmodern}
+
+% Seitenlayout
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+
+% Abbildungen, Tabellen und Zeichnungen
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
+
+% Quellcode und Pfadangaben
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{url}
+
+% Einstellungen für Befehlsblöcke
+\lstset{
+    basicstyle=\ttfamily\small,
+    frame=single,
+    breaklines=true,
+    columns=fullflexible,
+    keepspaces=true,
+    showstringspaces=false,
+    captionpos=b
+}
+
+% Absatzformatierung
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.5em}
+
+\title{Bericht}
+\author{Jiaqi Wang}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{ROS 2-Steuerung einer WS2812-LED über WLAN}
+
+In diesem Versuch wurde die integrierte WS2812-LED des ESP32-S3 über ROS~2 und WLAN gesteuert. Der ESP32-S3 arbeitet als WLAN-Access-Point und startet gleichzeitig einen UDP-Server. Nach dem Verbinden des Computers mit dem WLAN des ESP32-S3 können UDP-Nachrichten direkt an den Mikrocontroller gesendet werden.
+
+Auf der ROS~2-Seite wurde ein Python-Knoten implementiert. Dieser abonniert das Topic \texttt{/led\_color} vom Typ \texttt{std\_msgs/msg/String}. Die empfangenen RGB-Werte werden überprüft und anschließend als UDP-Paket an die IP-Adresse \texttt{192.168.4.1} auf Port \texttt{8080} übertragen.
+
+Der ESP32-S3 empfängt Nachrichten im Format \texttt{R,G,B}, beispielsweise \texttt{255,0,0}. Nach erfolgreichem Empfang werden die drei Farbwerte ausgelesen und an die Bibliothek \texttt{Adafruit NeoPixel} übergeben, wodurch die integrierte WS2812-LED unmittelbar ihre Farbe ändert.
+
+Durch die Kombination aus ROS~2, Python und WLAN konnte eine zuverlässige Kommunikation zwischen PC und ESP32-S3 realisiert werden. Das Verfahren eignet sich als Grundlage für zukünftige ROS~2-basierte Anwendungen, bei denen Sensoren oder Aktoren drahtlos über WLAN gesteuert werden.
+
+
+\section{Entwurf der Grundplatte mit Inkscape}
+
+Um den Schrittmotor, die Steuerplatine und den Akku zu einer kompakten Einheit zusammenzufassen, wurde eine Grundplatte mit der Vektorgrafiksoftware \textit{Inkscape} entworfen. Ziel war es, alle Komponenten sicher auf einer gemeinsamen Trägerplatte zu befestigen und den späteren Aufbau zu vereinfachen.
+
+Zunächst wurden mit einer Schieblehre die Positionen der Befestigungsbohrungen vermessen. Insgesamt wurden vier Bohrungen vorgesehen. Für den Schrittmotor wurden zwei Bohrungen mit einem Durchmesser von \textbf{M5} erstellt, während für die Steuerplatine zwei Bohrungen mit einem Durchmesser von \textbf{M3} vorgesehen wurden.
+
+Die endgültige Größe der Grundplatte beträgt \textbf{31\,cm $\times$ 20\,cm}. Um die Anforderungen der Laserschneidmaschine zu erfüllen, wurden sämtliche Konturen ausschließlich aus roten Linien mit einer Linienbreite von \textbf{0,03\,mm} erstellt. Alle Rechtecke und Kreise besitzen keine Flächenfüllung (\textit{Fill: None}), sodass ausschließlich die Schneidkonturen exportiert werden.
+
+Nach Abschluss des Entwurfs wurde die Zeichnung im SVG-Format unter dem Dateinamen \texttt{base\_v10.svg} gespeichert und anschließend für den Laserschneidprozess verwendet.
+
+\end{document}
+
