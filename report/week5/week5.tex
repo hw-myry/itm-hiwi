@@ -46,17 +46,6 @@
 
 \maketitle
 
-\section{ROS 2-Steuerung einer WS2812-LED über WLAN}
-
-In diesem Versuch wurde die integrierte WS2812-LED des ESP32-S3 über ROS~2 und WLAN gesteuert. Der ESP32-S3 arbeitet als WLAN-Access-Point und startet gleichzeitig einen UDP-Server. Nach dem Verbinden des Computers mit dem WLAN des ESP32-S3 können UDP-Nachrichten direkt an den Mikrocontroller gesendet werden.
-
-Auf der ROS~2-Seite wurde ein Python-Knoten implementiert. Dieser abonniert das Topic \texttt{/led\_color} vom Typ \texttt{std\_msgs/msg/String}. Die empfangenen RGB-Werte werden überprüft und anschließend als UDP-Paket an die IP-Adresse \texttt{192.168.4.1} auf Port \texttt{8080} übertragen.
-
-Der ESP32-S3 empfängt Nachrichten im Format \texttt{R,G,B}, beispielsweise \texttt{255,0,0}. Nach erfolgreichem Empfang werden die drei Farbwerte ausgelesen und an die Bibliothek \texttt{Adafruit NeoPixel} übergeben, wodurch die integrierte WS2812-LED unmittelbar ihre Farbe ändert.
-
-Durch die Kombination aus ROS~2, Python und WLAN konnte eine zuverlässige Kommunikation zwischen PC und ESP32-S3 realisiert werden. Das Verfahren eignet sich als Grundlage für zukünftige ROS~2-basierte Anwendungen, bei denen Sensoren oder Aktoren drahtlos über WLAN gesteuert werden.
-
-
 \section{Entwurf der Grundplatte mit Inkscape}
 
 Um den Schrittmotor, die Steuerplatine und den Akku zu einer kompakten Einheit zusammenzufassen, wurde eine Grundplatte mit der Vektorgrafiksoftware \textit{Inkscape} entworfen. Ziel war es, alle Komponenten sicher auf einer gemeinsamen Trägerplatte zu befestigen und den späteren Aufbau zu vereinfachen.
@@ -66,6 +55,205 @@ Zunächst wurden mit einer Schieblehre die Positionen der Befestigungsbohrungen 
 Die endgültige Größe der Grundplatte beträgt \textbf{31\,cm $\times$ 20\,cm}. Um die Anforderungen der Laserschneidmaschine zu erfüllen, wurden sämtliche Konturen ausschließlich aus roten Linien mit einer Linienbreite von \textbf{0,03\,mm} erstellt. Alle Rechtecke und Kreise besitzen keine Flächenfüllung (\textit{Fill: None}), sodass ausschließlich die Schneidkonturen exportiert werden.
 
 Nach Abschluss des Entwurfs wurde die Zeichnung im SVG-Format unter dem Dateinamen \texttt{base\_v10.svg} gespeichert und anschließend für den Laserschneidprozess verwendet.
+
+
+
+\section{Mehrere TCP-Clients}
+
+In der ersten Version unterstützte der ESP32 nur einen TCP-Client. Für das Projekt sollten jedoch sowohl die ROS~2-Anwendung als auch die PC-Software gleichzeitig mit dem ESP32 kommunizieren. Daher wurde der TCP-Server auf Mehrbenutzerbetrieb erweitert.
+
+Die maximale Anzahl der gleichzeitig verbundenen Clients wird über ein Array von \texttt{WiFiClient} verwaltet.
+
+\begin{lstlisting}[language=C++]
+#define MAX_TCP_CLIENTS 4
+
+WiFiClient tcpClients[MAX_TCP_CLIENTS];
+String tcpRxBuffers[MAX_TCP_CLIENTS];
+\end{lstlisting}
+
+\newpage
+
+Neue Verbindungen werden automatisch einem freien Slot zugewiesen.
+
+\begin{lstlisting}[language=C++]
+int slot = findFreeTcpClientSlot();
+
+if (slot >= 0) {
+    tcpClients[slot] = newClient;
+    tcpRxBuffers[slot] = "";
+}
+\end{lstlisting}
+
+Dadurch können beispielsweise die ROS~2-Steuerung und die PC-Benutzeroberfläche gleichzeitig Befehle senden und Statusinformationen vom ESP32 empfangen.
+
+
+\section{Motorsteuerung mit ROS~2}
+
+Nach der Verbindung mit dem WLAN-Hotspot des ESP32 stellt ein ROS~2-Node eine TCP-Verbindung zum ESP32 her. Befehle werden über das Topic \texttt{/esp32/command} empfangen und als Textnachrichten an den ESP32 weitergeleitet.
+
+\begin{lstlisting}[language=Python]
+self.command_subscription = self.create_subscription(
+    String,
+    '/esp32/command',
+    self.command_callback,
+    10
+)
+
+packet = (command + '\n').encode('utf-8')
+current_socket.sendall(packet)
+\end{lstlisting}
+
+Die Rückmeldungen des ESP32 werden über die Topics \texttt{/esp32/response} und \texttt{/esp32/motor\_state} veröffentlicht.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    box/.style={
+        draw,
+        rounded corners,
+        align=center,
+        minimum width=4.5cm,      % 稍宽一点
+        minimum height=1.2cm      % 稍高一点
+    },
+    arrow/.style={
+        -{Stealth[length=2.5mm]},
+        thick
+    },
+    returnarrow/.style={
+        -{Stealth[length=2.5mm]},
+        thick,
+        dashed
+    },
+    font=\small,
+    node distance=2.8cm           % 垂直间距加大
+]
+
+% Obere ROS-2-Kette
+\node[box] (terminal)
+    {Computer 1\\ROS~2 Terminal};
+
+\node[box, below=of terminal] (rosnode)
+    {ROS~2 Node\\Python};
+
+\node[box, below=of rosnode] (esp32)
+    {ESP32\\TCP-Server};
+
+% Qt GUI rechts neben ESP32 – 水平间距加大
+\node[box, right=4.5cm of esp32] (qt)
+    {Computer 2\\Qt GUI};
+
+% Terminal -> ROS 2 Node
+\draw[arrow]
+    (terminal.south) --
+    node[right, align=left]
+    {\texttt{/esp32/command}}
+    (rosnode.north);
+
+% ROS 2 Node -> ESP32
+\draw[arrow]
+    (rosnode.south) --
+    node[right]
+    {TCP über WLAN}
+    (esp32.north);
+
+% ESP32 -> ROS 2 Node (返回虚线)
+\draw[returnarrow]
+    ([xshift=-1.2cm]esp32.north) --   % 偏移加大，避免与实线交叉
+    node[left, align=right]
+    {\texttt{/esp32/response}\\
+     \texttt{/esp32/motor\_state}}
+    ([xshift=-1.2cm]rosnode.south);
+
+% Qt GUI -> ESP32
+\draw[arrow]
+    (qt.west) --
+    node[above]
+    {TCP über WLAN}
+    (esp32.east);
+
+% ESP32 -> Qt GUI (返回虚线)
+\draw[returnarrow]
+    ([yshift=-0.6cm]esp32.east) --    % 下移更多，避免与上边文字重叠
+    node[below]
+    {Statusrückmeldung}
+    ([yshift=-0.6cm]qt.west);
+
+\end{tikzpicture}
+\caption{Kommunikationsstruktur zwischen ROS~2, Qt GUI und ESP32.}
+\label{fig:communication-architecture}
+\end{figure}
+
+
+
+
+Typische Steuerbefehle sind:
+
+\begin{lstlisting}[language=bash]
+# Rückmeldungen anzeigen
+ros2 topic echo /esp32/response
+ros2 topic echo /esp32/motor_state
+
+# Motor bewegen
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'ANGLE:30'}"
+
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'ANGLE:-20'}"
+
+# Geschwindigkeit einstellen
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'SPEED:100'}"
+
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'SPEED:300'}"
+
+# Motor stoppen / fortsetzen
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'STOP'}"
+
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'RESUME'}"
+
+# Not-Aus / Not-Aus aufheben
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'ESTOP'}"
+
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'ESTOP_CLEAR'}"
+
+# Motorstatus abfragen
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'MOTOR_STATE?'}"
+
+# LED ein / aus
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'LED_ON'}"
+
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'LED_OFF'}"
+
+# LED-Farbe einstellen
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'RGB:255,0,0'}"
+
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'RGB:0,255,0'}"
+
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'RGB:0,0,255'}"
+
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'RGB:255,255,255'}"
+
+ros2 topic pub --once /esp32/command \
+std_msgs/msg/String "{data:'RGB:0,0,0'}"
+\end{lstlisting}
+
+
+\section{TO-DO-List}
+
+In Zukunft soll der aktuell separate ROS~2-Motorsteuerungsknoten in den Hauptkommunikationsknoten integriert werden. Dadurch werden die Kommunikation mit dem ESP32 sowie die Motorsteuerung zentral in einem ROS~2-Knoten verwaltet.
+
 
 \end{document}
 

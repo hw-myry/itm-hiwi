@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.13)  21 JUL 2026 15:10
+This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.13)  24 JUL 2026 15:53
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -616,42 +616,95 @@ LaTeX Font Info:    External font `lmex10' loaded for size
 (Font)              <10> on input line 47.
 LaTeX Font Info:    External font `lmex10' loaded for size
 (Font)              <7> on input line 47.
+LaTeX Font Info:    External font `lmex10' loaded for size
+(Font)              <12> on input line 55.
+LaTeX Font Info:    External font `lmex10' loaded for size
+(Font)              <8> on input line 55.
+LaTeX Font Info:    External font `lmex10' loaded for size
+(Font)              <6> on input line 55.
 LaTeX Font Info:    Trying to load font information for T1+lmtt on input line 5
-3.
+7.
 
 (c:/texlive/2026/texmf-dist/tex/latex/lm/t1lmtt.fd
 File: t1lmtt.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
-Overfull \hbox (2.2354pt too wide) in paragraph at lines 55--56
-\T1/lmr/m/n/12 folg-rei-chem Emp-fang wer-den die drei Farb-wer-te aus-ge-le-se
-n und an die Bi-blio-thek \T1/lmtt/m/n/12 Adafruit
- []
-
-[1
+(c:/texlive/2026/texmf-dist/tex/latex/listings/lstlang1.sty
+File: lstlang1.sty 2025/11/14 1.11b listings language file
+)
+(c:/texlive/2026/texmf-dist/tex/latex/listings/lstlang1.sty
+File: lstlang1.sty 2025/11/14 1.11b listings language file
+)
+(c:/texlive/2026/texmf-dist/tex/latex/listings/lstmisc.sty
+File: lstmisc.sty 2025/11/14 1.11b (Carsten Heinz)
+)
+LaTeX Font Info:    Font shape `T1/lmtt/bx/n' in size <10.95> not available
+(Font)              Font shape `T1/lmtt/b/n' tried instead on input line 68.
+ [1
 
 {c:/texlive/2026/texmf-var/fonts/map/pdftex/updmap/pdftex.map}{c:/texlive/2026/
-texmf-dist/fonts/enc/dvips/lm/lm-ec.enc}] (./week5.aux)
+texmf-dist/fonts/enc/dvips/lm/lm-ec.enc}{c:/texlive/2026/texmf-dist/fonts/enc/d
+vips/lm/lm-mathsy.enc}]
+Overfull \hbox (3.8467pt too wide) in paragraph at lines 87--88
+[]\T1/lmr/m/n/12 Dadurch kön-nen bei-spiels-wei-se die ROS 2-Steuerung und die 
+PC-Benutzeroberfläche gleich-
+ []
+
+(c:/texlive/2026/texmf-dist/tex/latex/listings/lstlang1.sty
+File: lstlang1.sty 2025/11/14 1.11b listings language file
+)
+Overfull \hbox (51.21672pt too wide) in paragraph at lines 106--107
+[]\T1/lmr/m/n/12 Die Rück-mel-dun-gen des ESP32 wer-den über die To-pics \T1/lm
+tt/m/n/12 /esp32/response \T1/lmr/m/n/12 und \T1/lmtt/m/n/12 /esp32/motor_state
+
+ []
+
+
+Overfull \hbox (11.30214pt too wide) in paragraph at lines 181--182
+ [][] 
+ []
+
+[2] (c:/texlive/2026/texmf-dist/tex/latex/listings/lstlang1.sty
+File: lstlang1.sty 2025/11/14 1.11b listings language file
+)
+(c:/texlive/2026/texmf-dist/tex/latex/listings/lstlang1.sty
+File: lstlang1.sty 2025/11/14 1.11b listings language file
+)
+
+! LaTeX Error: Invalid UTF-8 byte sequence (Ã\lst@EC¼).
+
+See the LaTeX manual or LaTeX Companion for explanation.
+Type  H <return>  for immediate help.
+ ...                                              
+                                                  
+l.192 # RÃ¼ckmeldungen 
+                       anzeigen
+? 
+[3] [4] (./week5.aux)
  ***********
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-01-19>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 15924 strings out of 467525
- 315973 string characters out of 5423209
- 710930 words of memory out of 5000000
- 44566 multiletter control sequences out of 15000+600000
- 655165 words of font info for 58 fonts, out of 8000000 for 9000
+ 16691 strings out of 467525
+ 325495 string characters out of 5423209
+ 1093309 words of memory out of 5000000
+ 45308 multiletter control sequences out of 15000+600000
+ 677172 words of font info for 73 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 84i,6n,104p,426b,266s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 84i,8n,104p,456b,1757s stack positions out of 10000i,1000n,20000p,200000b,200000s
 <c:/texlive/2026/texmf-dist/fonts/type1/public/lm/lmbx12.pfb><c:/texlive/2026
-/texmf-dist/fonts/type1/public/lm/lmr12.pfb><c:/texlive/2026/texmf-dist/fonts/t
-ype1/public/lm/lmr17.pfb><c:/texlive/2026/texmf-dist/fonts/type1/public/lm/lmtt
-12.pfb>
-Output written on week5.pdf (1 page, 105804 bytes).
+/texmf-dist/fonts/type1/public/lm/lmr10.pfb><c:/texlive/2026/texmf-dist/fonts/t
+ype1/public/lm/lmr12.pfb><c:/texlive/2026/texmf-dist/fonts/type1/public/lm/lmr1
+7.pfb><c:/texlive/2026/texmf-dist/fonts/type1/public/lm/lmri12.pfb><c:/texlive/
+2026/texmf-dist/fonts/type1/public/lm/lmsy10.pfb><c:/texlive/2026/texmf-dist/fo
+nts/type1/public/lm/lmtk10.pfb><c:/texlive/2026/texmf-dist/fonts/type1/public/l
+m/lmtt10.pfb><c:/texlive/2026/texmf-dist/fonts/type1/public/lm/lmtt12.pfb><c:/t
+exlive/2026/texmf-dist/fonts/type1/public/lm/lmtti10.pfb>
+Output written on week5.pdf (4 pages, 237115 bytes).
 PDF statistics:
- 32 PDF objects out of 1000 (max. 8388607)
- 20 compressed objects within 1 object stream
+ 72 PDF objects out of 1000 (max. 8388607)
+ 45 compressed objects within 1 object stream
  0 named destinations out of 1000 (max. 500000)
  13 words of extra memory for PDF output out of 10000 (max. 10000000)
 

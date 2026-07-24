@@ -4101,10 +4101,25 @@ void MainWindow::handleEsp32Line(const QString &line)
         return;
     }
 
-    // ESP32 sends this only after the motor actually stops: MOTOR_DONE STATUS=OK ...
-    // Single mode: unlock the button after MOTOR_DONE.
-    // Back-and-forth mode: after MOTOR_DONE, send the next segment unless stop was requested;
-    // if stop was already requested, finish after this MOTOR_DONE and do not send the next ANGLE.
+    // ESP32 returns MOTOR_DONE after one motor execution cycle ends.
+    //
+    // Important:
+    //   STATUS=OK / POST_CORRECT_OK:
+    //       The current ANGLE segment really finished.
+    //       In back-and-forth mode, only now may the next segment be sent.
+    //
+    //   STATUS=PAUSED:
+    //       STOP interrupted the current segment and ESP32 saved the remaining angle.
+    //       Do not send a new ANGLE here, otherwise ESP32 will clear the paused motion
+    //       and a later RESUME will return NO_PAUSED_MOTION.
+    //
+    // Back-and-forth example for A=40:
+    //   send +40
+    //   wait for MOTOR_DONE STATUS=OK
+    //   send -80
+    //   wait for MOTOR_DONE STATUS=OK
+    //   send +80
+    //   ...
     if (line.startsWith("MOTOR_DONE")) {
         QString finalAngle = valueFromLine(line, "FINAL");
         if (!finalAngle.isEmpty()) {
@@ -4113,40 +4128,100 @@ void MainWindow::handleEsp32Line(const QString &line)
 
         QRegularExpression statusRe("\\bSTATUS=([^\\s]+)");
         QRegularExpressionMatch statusMatch = statusRe.match(line);
-        QString motorStatus = statusMatch.hasMatch() ? statusMatch.captured(1) : QString();
-
-        if (motorStatus.isEmpty() || motorStatus == "OK" || motorStatus == "POST_CORRECT_OK") {
-            setSendAngleStatusSuccess();
-        } else {
-            setSendAngleStatusFailed();
-        }
+        const QString motorStatus =
+            statusMatch.hasMatch() ? statusMatch.captured(1) : QString();
 
         gMotorMoving = false;
 
+        // =====================================================
+        // STOP paused the current movement.
+        // Keep the back-and-forth sequence state, but do not send
+        // the next ANGLE until RESUME finishes the saved movement.
+        // =====================================================
+        if (motorStatus == "PAUSED") {
+            setSendAngleStatusIdle("Paused");
+
+            if (gAngleSequenceRunning) {
+                ui->sendAngleButton->setEnabled(false);
+                ui->sendAngleButton->setText(
+                    QString("Paused (Run #%1) - waiting for RESUME")
+                        .arg(gBackAndForthSentCount)
+                    );
+                ui->sendAngleButton->setStyleSheet(
+                    SEND_ANGLE_SWING_STOPPING_STYLE
+                    );
+
+                addLog(
+                    QString("Back-and-forth segment #%1 paused. "
+                            "Waiting for ESP32 RESUME completion; "
+                            "no next ANGLE will be sent.")
+                        .arg(gBackAndForthSentCount)
+                    );
+            } else {
+                setSendAngleIdle(ui);
+                addLog("Single movement paused. Waiting for RESUME.");
+            }
+
+            return;
+        }
+
+        // Only successful completion is allowed to advance the sequence.
+        const bool segmentCompleted =
+            motorStatus.isEmpty() ||
+            motorStatus == "OK" ||
+            motorStatus == "POST_CORRECT_OK";
+
+        if (!segmentCompleted) {
+            setSendAngleStatusFailed();
+
+            gAngleSequenceRunning = false;
+            gAngleSequenceStopRequested = false;
+            gBackAndForthBaseAngle = 0.0;
+            gBackAndForthSentCount = 0;
+
+            setSendAngleIdle(ui);
+            addLog(
+                QString("Motor segment did not complete successfully: STATUS=%1. "
+                        "Back-and-forth stopped.")
+                    .arg(motorStatus.isEmpty() ? "UNKNOWN" : motorStatus)
+                );
+            return;
+        }
+
+        setSendAngleStatusSuccess();
+
+        // =====================================================
+        // Back-and-forth: the previous segment has really finished.
+        // Only here calculate and send the next segment.
+        // =====================================================
         if (gAngleSequenceRunning) {
             if (gAngleSequenceStopRequested) {
                 gAngleSequenceRunning = false;
                 gAngleSequenceStopRequested = false;
                 gBackAndForthBaseAngle = 0.0;
                 gBackAndForthSentCount = 0;
+
                 setSendAngleIdle(ui);
-                addLog("Back-and-forth stopped after current MOTOR_DONE");
+                addLog("Back-and-forth stopped after current segment completed.");
                 return;
             }
 
+            // Example A=40:
+            // completed segment #1: +40  -> next = -80
+            // completed segment #2: -80  -> next = +80
+            // completed segment #3: +80  -> next = -80
             const double nextAngle = nextBackAndForthAngle();
-            gBackAndForthSentCount++;
-
-            gMotorMoving = true;
-            setSendAngleBusy(ui);
+            const int nextSegmentNumber = gBackAndForthSentCount + 1;
 
             addLog(
-                QString("Back-and-forth next angle #%1: %2")
+                QString("Segment #%1 completed. Next segment #%2 will be ANGLE:%3")
                     .arg(gBackAndForthSentCount)
+                    .arg(nextSegmentNumber)
                     .arg(formatAngleForCommand(nextAngle))
                 );
 
-            // Delay 100 ms before sending the next segment so ESP32 MOTOR_DONE and host logs are processed first.
+            // A small delay only separates TCP messages.
+            // The next command is scheduled only after MOTOR_DONE was received above.
             QTimer::singleShot(100, this, [=]() {
                 if (!gAngleSequenceRunning) {
                     return;
@@ -4158,30 +4233,53 @@ void MainWindow::handleEsp32Line(const QString &line)
                     gAngleSequenceStopRequested = false;
                     gBackAndForthBaseAngle = 0.0;
                     gBackAndForthSentCount = 0;
+
                     setSendAngleIdle(ui);
-                    addLog("Back-and-forth stopped before sending next angle");
+                    addLog("Back-and-forth stopped before sending the next segment.");
                     return;
                 }
 
                 if (socket->state() != QAbstractSocket::ConnectedState) {
-                    addLog("Not connected, back-and-forth stopped");
                     gMotorMoving = false;
                     gAngleSequenceRunning = false;
                     gAngleSequenceStopRequested = false;
                     gBackAndForthBaseAngle = 0.0;
                     gBackAndForthSentCount = 0;
+
                     setSendAngleIdle(ui);
+                    setSendAngleStatusFailed();
+                    addLog("TCP disconnected. Back-and-forth stopped.");
                     return;
                 }
 
-                sendCommand(QString("ANGLE:%1").arg(formatAngleForCommand(nextAngle)));
+                // Update the counter only when the next command is actually about to be sent.
+                gBackAndForthSentCount = nextSegmentNumber;
+                gMotorMoving = true;
+                setSendAngleBusy(ui);
+
+                sendCommand(
+                    QString("ANGLE:%1")
+                        .arg(formatAngleForCommand(nextAngle))
+                    );
+
+                if (!gLastCommandWriteOk) {
+                    gMotorMoving = false;
+                    gAngleSequenceRunning = false;
+                    gAngleSequenceStopRequested = false;
+                    gBackAndForthBaseAngle = 0.0;
+                    gBackAndForthSentCount = 0;
+
+                    setSendAngleIdle(ui);
+                    setSendAngleStatusFailed();
+                    addLog("Next back-and-forth ANGLE write failed. Sequence stopped.");
+                }
             });
 
             return;
         }
 
         setSendAngleIdle(ui);
-        addLog("Motor finished, send angle unlocked");
+        addLog("Motor segment completed. Send Angle unlocked.");
         return;
     }
 

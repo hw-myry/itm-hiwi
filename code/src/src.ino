@@ -1071,55 +1071,70 @@ String handleCommand(String cmd) {
 
   // =====================================================
   // LED
+  // 同时兼容：
+  //   LED ON / LED_ON
+  //   LED OFF / LED_OFF
+  // RGB 命令会自动开启 LED，不需要先发送 LED ON。
   // =====================================================
-  if (cmd == "LED_ON") {
+  if (cmd == "LED ON" || cmd == "LED_ON") {
 #if USE_NEOPIXEL_LED == 1
     ledEnabled = true;
     setColor(255, 255, 255);
-    return "OK LED_ON";
+    return "OK LED ON";
 #else
     ledEnabled = false;
-    return "ERR LED DISABLED GPIO38_USED_BY_A4988_EN";
+    return "ERR LED DISABLED";
 #endif
   }
 
-  if (cmd == "LED_OFF") {
+  if (cmd == "LED OFF" || cmd == "LED_OFF") {
     ledEnabled = false;
 #if USE_NEOPIXEL_LED == 1
     pixels.clear();
     pixels.show();
 #endif
-    return "OK LED_OFF";
+    return "OK LED OFF";
   }
 
   if (cmd.startsWith("RGB:")) {
 #if USE_NEOPIXEL_LED != 1
-    return "ERR LED DISABLED GPIO38_USED_BY_A4988_EN";
-#endif
-
-    if (!ledEnabled) {
-      return "LED IS OFF";
-    }
-
+    return "ERR LED DISABLED";
+#else
     String rgb = cmd.substring(4);
+    rgb.trim();
 
     int p1 = rgb.indexOf(',');
     int p2 = rgb.indexOf(',', p1 + 1);
 
-    if (p1 > 0 && p2 > p1) {
-      int r = rgb.substring(0, p1).toInt();
-      int g = rgb.substring(p1 + 1, p2).toInt();
-      int b = rgb.substring(p2 + 1).toInt();
-
-      r = constrain(r, 0, 255);
-      g = constrain(g, 0, 255);
-      b = constrain(b, 0, 255);
-
-      setColor(r, g, b);
-      return "OK RGB";
-    } else {
-      return "RGB FORMAT ERROR";
+    if (p1 <= 0 || p2 <= p1 || p2 >= rgb.length() - 1) {
+      return "ERR RGB FORMAT USE RGB:r,g,b";
     }
+
+    String rText = rgb.substring(0, p1);
+    String gText = rgb.substring(p1 + 1, p2);
+    String bText = rgb.substring(p2 + 1);
+
+    rText.trim();
+    gText.trim();
+    bText.trim();
+
+    if (!isValidNumber(rText) ||
+        !isValidNumber(gText) ||
+        !isValidNumber(bText)) {
+      return "ERR RGB FORMAT USE RGB:r,g,b";
+    }
+
+    int r = constrain(rText.toInt(), 0, 255);
+    int g = constrain(gText.toInt(), 0, 255);
+    int b = constrain(bText.toInt(), 0, 255);
+
+    ledEnabled = true;
+    setColor(r, g, b);
+
+    return "OK RGB R=" + String(r) +
+           " G=" + String(g) +
+           " B=" + String(b);
+#endif
   }
 
   // =====================================================
