@@ -1,6 +1,6 @@
-# README - 导入 Fusion 360 OBJ 到 Gazebo Sim
+# README - Fusion 360 OBJ 导入 Gazebo Sim
 
-> 环境：
+> 环境
 >
 > - Ubuntu 22.04
 > - Gazebo Sim 8 (`gz sim`)
@@ -9,9 +9,9 @@
 
 ---
 
-# 1. Fusion 导出 OBJ
+# 1. 从 Fusion 360 导出 OBJ
 
-Fusion 360：
+在 Fusion 360 中：
 
 ```
 File
@@ -21,69 +21,114 @@ Export
 OBJ
 ```
 
-导出后得到：
+导出后会得到：
+
+例如：
 
 ```
 Traumfaenger_EXPORT_arm.obj
 Traumfaenger_EXPORT_arm.mtl
 ```
 
-建议先用 Blender 打开确认：
+或者：
 
-- 模型正常
-- 法向正确
-- 没有缺面
-- 材质正常
+```
+Traumfaenger_EXPORT_motor.obj
+Traumfaenger_EXPORT_motor.mtl
+```
 
-如果 Blender 能正常显示，说明 OBJ 基本没有问题。
+建议先使用 Blender 打开 OBJ 文件进行检查：
+
+- 模型是否完整
+- 法向是否正确
+- 是否存在缺面
+- 坐标方向是否正确
+- 尺寸是否正确
+
+确认 Blender 中显示正常后，再导入 Gazebo。
 
 ---
 
-# 2. 建立 Gazebo 模型目录
+# 2. 工程目录结构
 
-推荐目录结构：
+推荐目录如下：
 
 ```
 target_point/
 
-├── world.sdf
-└── arm/
-    ├── model.config
-    ├── model.sdf
-    └── meshes/
-        ├── Traumfaenger_EXPORT_arm.obj
-        └── Traumfaenger_EXPORT_arm.mtl
+├── arm/
+│   ├── model.config
+│   ├── model.sdf
+│   └── meshes/
+│       ├── Traumfaenger_EXPORT_arm.obj
+│       └── Traumfaenger_EXPORT_arm.mtl
+│
+├── motor/
+│   ├── model.config
+│   ├── model.sdf
+│   └── meshes/
+│       ├── Traumfaenger_EXPORT_motor.obj
+│       └── Traumfaenger_EXPORT_motor.mtl
+│
+├── world1.sdf
+├── world2.sdf
+└── world3.sdf
 ```
 
-为什么这样？
-
-Gazebo 一个模型(Model)至少需要：
+其中：
 
 ```
-model.config
-model.sdf
+arm/
+motor/
 ```
 
-mesh 放在：
+均属于 Gazebo 的一个独立 Model。
+
+后续可以继续增加：
 
 ```
-meshes/
+base/
+camera/
+gripper/
+link1/
+link2/
 ```
 
-这是 Gazebo 官方推荐的目录结构。
+每个零件都建议建立独立的 Model。
 
 ---
 
-# 3. model.config
+# 3. Gazebo Model 文件说明
 
-内容：
+一个 Gazebo Model 推荐采用如下结构：
+
+```
+model/
+
+├── model.config
+├── model.sdf
+└── meshes/
+```
+
+其中三个部分分别负责不同功能。
+
+---
+
+## 3.1 model.config
+
+作用：
+
+- 注册模型名称
+- 告诉 Gazebo 模型描述文件的位置
+
+例如：
 
 ```xml
 <?xml version="1.0"?>
 
 <model>
 
-    <name>arm</name>
+    <name>motor</name>
 
     <version>1.0</version>
 
@@ -94,43 +139,48 @@ meshes/
     </author>
 
     <description>
-        Arm Model
+        Motor Model
     </description>
 
 </model>
 ```
 
-作用：
+如果是 arm，只需要修改：
 
-告诉 Gazebo：
+```xml
+<name>arm</name>
+```
 
-- 模型名称叫 arm
-- 真正描述模型的是 model.sdf
+即可。
 
 ---
 
-# 4. model.sdf
+## 3.2 model.sdf
 
-最简单版本：
+作用：
+
+描述模型结构。
+
+例如：
 
 ```xml
 <?xml version="1.0"?>
 
 <sdf version="1.9">
 
-<model name="arm">
+<model name="motor">
 
     <static>true</static>
 
-    <link name="link">
+    <link name="motor_link">
 
-        <visual name="visual">
+        <visual name="motor_visual">
 
             <geometry>
 
                 <mesh>
 
-                    <uri>meshes/Traumfaenger_EXPORT_arm.obj</uri>
+                    <uri>meshes/Traumfaenger_EXPORT_motor.obj</uri>
 
                     <scale>1 1 1</scale>
 
@@ -147,170 +197,94 @@ meshes/
 </sdf>
 ```
 
-为什么这样写？
-
-Gazebo 模型层级：
-
-```
-Model
-    ↓
-Link
-    ↓
-Visual
-    ↓
-Geometry
-    ↓
-Mesh
-```
-
-也就是：
+Gazebo 模型层级如下：
 
 ```
 Model
 └── Link
-        └── Visual
-                └── Mesh
+    └── Visual
+        └── Geometry
+            └── Mesh
 ```
 
-其中：
+目前仅使用：
 
 ```
-<visual>
+Visual
 ```
 
-负责显示模型。
+负责模型显示。
 
-目前没有物理碰撞。
-
-以后再添加：
+以后可继续添加：
 
 ```
-<collision>
+Collision
 ```
 
-以及
+实现碰撞检测。
+
+再添加：
 
 ```
-<inertial>
+Inertial
 ```
 
-即可实现真实物理仿真。
+实现真实物理仿真。
+
+最后添加：
+
+```
+Joint
+```
+
+连接多个 Link，实现机器人运动。
 
 ---
 
-# 5. world.sdf
-
-例如：
-
-```xml
-<?xml version="1.0"?>
-
-<sdf version="1.9">
-
-<world name="default">
-
-    <include>
-        <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Ground Plane</uri>
-    </include>
-
-    <include>
-        <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Sun</uri>
-    </include>
-
-    <include>
-        <uri>model://arm</uri>
-    </include>
-
-</world>
-
-</sdf>
-```
+## 3.3 meshes
 
 作用：
 
-Ground Plane：
-
-提供地面。
-
-Sun：
-
-提供光照。
-
-```
-model://arm
-```
-
-表示：
-
-去 Resource Path 中寻找
-
-```
-arm/
-```
-
-这个模型。
-
----
-
-# 6. 设置 Gazebo 模型路径
-
-告诉 Gazebo 去哪里寻找模型。
+存放模型文件。
 
 例如：
 
-```bash
-export GZ_SIM_RESOURCE_PATH=~/jwang/itm-hiwi/3d/target_point
+```
+meshes/
+
+├── xxx.obj
+├── xxx.mtl
+├── texture.png
+└── texture.jpg
 ```
 
-检查：
+通常包括：
 
-```bash
-echo $GZ_SIM_RESOURCE_PATH
-```
-
-应该输出：
-
-```bash
-/home/itmhiwi/jwang/itm-hiwi/3d/target_point
-```
-
-如果以后有多个模型路径：
-
-推荐：
-
-```bash
-export GZ_SIM_RESOURCE_PATH=$HOME/jwang/itm-hiwi/3d/target_point:$GZ_SIM_RESOURCE_PATH
-```
-
-不要覆盖已有路径。
+- OBJ 模型
+- MTL 材质
+- PNG/JPG 纹理
 
 ---
 
-# 7. 运行 Gazebo
+# 4. World 文件说明
 
-进入工程目录：
-
-```bash
-cd ~/jwang/itm-hiwi/3d/target_point
-```
-
-运行：
-
-```bash
-gz sim world.sdf
-```
-
-或者查看详细日志：
-
-```bash
-gz sim -v 4 world.sdf
-```
+目前工程包含三个测试场景。
 
 ---
 
-# 8. 判断是否成功
+## world1.sdf
 
-Entity Tree 中应出现：
+作用：
+
+仅显示 Arm 模型。
+
+启动：
+
+```bash
+gz sim world1.sdf
+```
+
+Entity Tree：
 
 ```
 default
@@ -322,170 +296,273 @@ arm
 sun
 ```
 
-说明：
+---
 
-OBJ 已经成功导入 Gazebo。
+## world2.sdf
+
+作用：
+
+仅显示 Motor 模型。
+
+启动：
+
+```bash
+gz sim world2.sdf
+```
+
+Entity Tree：
+
+```
+default
+
+ground_plane
+
+motor
+
+sun
+```
 
 ---
 
-# 9. 关于 Scale
+## world3.sdf
 
-Fusion 当前测量：
+作用：
 
-```
-孔直径 = 10 mm
-```
+同时显示 Arm 与 Motor。
 
-说明：
+启动：
 
-Fusion 建模单位为 **mm**。
-
-Gazebo 内部单位为 **m**。
-
-不同导出器对 OBJ 单位的处理方式不同，因此：
-
-```
-<scale>1 1 1</scale>
+```bash
+gz sim world3.sdf
 ```
 
-或者
+Entity Tree：
 
 ```
-<scale>0.001 0.001 0.001</scale>
+default
+
+ground_plane
+
+arm
+
+motor
+
+sun
 ```
 
-都可能是正确的。
+以后如果继续导入：
 
-不要默认认为 Fusion 导出的 OBJ 一定需要乘 0.001。
+```
+base
+camera
+gripper
+```
 
-正确的方法是：
+只需继续增加：
 
-根据 Gazebo 中实际尺寸判断。
+```xml
+<include>
+    <uri>model://base</uri>
+</include>
+```
 
-如果尺寸与 Fusion 一致，就保持：
+即可。
+
+---
+
+# 5. 设置 Gazebo 模型搜索路径
+
+Gazebo 需要知道模型所在目录。
+
+运行：
+
+```bash
+export GZ_SIM_RESOURCE_PATH=$HOME/jwang/itm-hiwi/3d/target_point
+```
+
+检查：
+
+```bash
+echo $GZ_SIM_RESOURCE_PATH
+```
+
+输出应类似：
+
+```bash
+/home/itmhiwi/jwang/itm-hiwi/3d/target_point
+```
+
+如果已经存在其它模型路径，推荐：
+
+```bash
+export GZ_SIM_RESOURCE_PATH=$HOME/jwang/itm-hiwi/3d/target_point:$GZ_SIM_RESOURCE_PATH
+```
+
+避免覆盖已有路径。
+
+---
+
+# 6. 启动 Gazebo
+
+进入工程目录：
+
+```bash
+cd ~/jwang/itm-hiwi/3d/target_point
+```
+
+启动不同场景：
+
+测试 Arm：
+
+```bash
+gz sim world1.sdf
+```
+
+测试 Motor：
+
+```bash
+gz sim world2.sdf
+```
+
+测试整体：
+
+```bash
+gz sim world3.sdf
+```
+
+查看详细日志：
+
+```bash
+gz sim -v 4 world3.sdf
+```
+
+---
+
+# 7. 关于模型尺寸（Scale）
+
+Fusion 360 默认建模单位通常为：
+
+```
+mm
+```
+
+Gazebo 使用单位：
+
+```
+m
+```
+
+不同 OBJ 导出器对于单位的处理方式可能不同，因此：
 
 ```xml
 <scale>1 1 1</scale>
 ```
 
+或者：
+
+```xml
+<scale>0.001 0.001 0.001</scale>
+```
+
+都有可能正确。
+
+建议根据 Gazebo 中模型实际尺寸进行判断。
+
+如果尺寸与 Fusion 一致，则保持：
+
+```xml
+<scale>1 1 1</scale>
+```
+
+无需修改。
+
 ---
 
-# 10. 为什么先调整尺寸？
+# 8. 当前工程完成情况
 
-最终机械臂结构：
+目前已经完成：
 
-```
-Robot
+- ✅ Fusion 360 导出 OBJ
+- ✅ Blender 检查模型
+- ✅ Arm 成功导入 Gazebo
+- ✅ Motor 成功导入 Gazebo
+- ✅ 多个 Model 同时加载
+- ✅ Gazebo 模型搜索路径配置完成
 
-├── Base
-│
-├── Link1
-│
-├── Link2
-│
-├── Link3
-│
-└── End Effector
-```
+目前已经能够正常加载多个独立模型进行测试。
 
-如果第一个 Link：
+---
 
-- Scale
-- Pose
-- 坐标系
-
-没有调整正确，
-
-后续所有 Link 都需要重新调整。
-
-因此建议流程：
+# 9. 后续开发计划
 
 ```
-确认 Scale
+Fusion 360 装配体
 
-↓
+        │
 
-确认 Pose
+        ▼
 
-↓
+导出各个零件 OBJ
 
-确认坐标系
+        │
 
-↓
+        ▼
+
+建立 Gazebo Model
+
+        │
+
+        ▼
 
 导入 Base
 
-↓
+        │
+
+        ▼
+
+导入 Motor
+
+        │
+
+        ▼
+
+导入 Arm
+
+        │
+
+        ▼
 
 导入其它 Link
 
-↓
+        │
+
+        ▼
 
 建立 Joint
 
-↓
+        │
+
+        ▼
 
 添加 Collision
 
-↓
+        │
+
+        ▼
 
 添加 Inertial
 
-↓
+        │
+
+        ▼
 
 ROS 2 控制
-```
 
-这样后续几乎不用返工。
+        │
 
----
-
-# 11. 后续计划
-
-完成单个 OBJ 导入之后：
-
-```
-Fusion Assembly
-
-↓
-
-导出每一个零件 OBJ
-
-↓
-
-导入 Base
-
-↓
-
-导入 Link1
-
-↓
-
-导入 Link2
-
-↓
-
-导入 Link3
-
-↓
-
-建立 Joint
-
-↓
-
-添加 Collision
-
-↓
-
-添加 Inertial
-
-↓
-
-ROS 2 + Gazebo 控制
-
-↓
+        ▼
 
 完成机械臂仿真
 ```
 
-最终目标是把 Fusion 360 的装配体转换为 Gazebo 中可运动、可控制、可仿真的机器人。
+最终目标是将 Fusion 360 的装配体逐步转换为 Gazebo 中可运动、可控制、可进行物理仿真的机器人模型。
