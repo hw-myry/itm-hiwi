@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+
+<sdf version="1.9">
+    <world name="world1">
+
+        <include>
+            <uri>model://arm</uri>
+            <name>arm</name>
+            <pose>0 0 0 0 0 0</pose>
+        </include>
+
+    </world>
+</sdf>
