@@ -2,20 +2,13 @@
 
 <sdf version="1.9">
 
-<world name="default">
+    <world name="default">
 
-    <include>
-        <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Ground Plane</uri>
-    </include>
+        <include>
+            <uri>model://base</uri>
+            <pose>0 0 0.5 0 0 0</pose>
+        </include>
 
-    <include>
-        <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Sun</uri>
-    </include>
-
-    <include>
-        <uri>model://arm</uri>
-    </include>
-
-</world>
+    </world>
 
 </sdf>
