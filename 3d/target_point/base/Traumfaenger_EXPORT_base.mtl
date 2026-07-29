@@ -15,12 +15,6 @@ Kd 0.960784 0.960784 0.964706
 newmtl Steel_-_Satin
 Kd 0.627451 0.627451 0.627451
 
-newmtl Aluminum_-_Satin
-Kd 0.960784 0.960784 0.964706
-
-newmtl 3D_Oak_-_Stained_light_semigloss
-Kd 0.749020 0.615686 0.462745
-
 newmtl Plastic_-_Matte_(Black)
 Kd 0.098039 0.098039 0.098039
 
