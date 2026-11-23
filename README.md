@@ -2,7 +2,7 @@
 
 Ziel des Projekts ist es, mithilfe eines Motion-Capture-Systems, ROS 2 und modellprädiktiver Regelung (MPC) eine Crazyflie-Drohne durch einen schwingenden Zielring (Target Point) zu steuern und anschließend auf dem Bodenroboter Hera zu landen.
 
-![Versuchsaufbau mit Crazyflie, Zielring und Hera](0.jpg)
+![Versuchsaufbau mit Crazyflie, Zielring und Hera](0.png)
 
 
 ## Hardware Entwicklung
