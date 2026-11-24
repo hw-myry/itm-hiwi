@@ -18,8 +18,9 @@ Meine zweite Aufgabe ist die Entwicklung der Firmware für den ESP32-C5 auf der 
 
 
 ## STM32-Firmware Entwicklung
-<img src="4.jpg" alt="Crazyflie" width="400">
 Die Bitcraze-Firmware um einen zusätzlichen Thread erweitern, der auf einen ROS-2-Befehl hin eine LED einschaltet.
+<img src="4.jpg" alt="Crazyflie" width="400">
+
 
 ## Host PC Entwicklung
 
